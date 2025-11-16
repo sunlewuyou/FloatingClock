@@ -17,3 +17,16 @@
 - 定期自动同步 NTP/HTTP 时间并保存最近同步记录。
 - 支持本地持久化用户添加的时间源（`shared_preferences`）。
 - 支持画中画模式（PiP）。
+
+**代码结构**
+
+- `lib/main.dart`：应用入口，仅负责启动 `MyApp` 并引用具体页面。
+- `lib/pages/`：`HomePage`、`AboutPage` 等页面及其状态、UI、NTP/HTTP 同步、PlatformChannel、SharedPreferences 等业务逻辑。
+- `lib/models/`：定义 `TimePrecision`/`TimeSource` 以及相关序列化与持久化工具，供界面与服务重用。
+- `test/`：UI 测试位于 `test/widget_test.dart`，使用 `SharedPreferences` mock 并验证关键控件。
+
+**运行与测试**
+
+- `flutter pub get`
+- `flutter run`
+- `flutter test test/widget_test.dart`
