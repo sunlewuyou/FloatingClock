@@ -198,8 +198,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   _FractionColorOption get _fractionColorOption =>
-      _fractionColorOptions.firstWhere(
-          (opt) => opt.key == _fractionColorKey,
+      _fractionColorOptions.firstWhere((opt) => opt.key == _fractionColorKey,
           orElse: () => _fractionColorOptions.first);
 
   Color get _fractionColor => _fractionColorOption.color;
@@ -1225,36 +1224,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                 Expanded(
                                   child: Align(
                                     alignment: Alignment.centerRight,
-                                    child: Wrap(
-                                      alignment: WrapAlignment.end,
-                                      spacing: 12,
-                                      runSpacing: 4,
-                                      children: TimePrecision.values.map((p) {
-                                        return InkWell(
-                                          borderRadius: BorderRadius.circular(24),
-                                          onTap: () => _onPrecisionChanged(p),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Radio<TimePrecision>(
-                                                value: p,
-                                                groupValue: _timePrecision,
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                materialTapTargetSize:
-                                                    MaterialTapTargetSize
-                                                        .shrinkWrap,
-                                                onChanged: (value) {
-                                                  if (value != null) {
-                                                    _onPrecisionChanged(value);
-                                                  }
-                                                },
-                                              ),
-                                              Text(_precisionLabel(p)),
-                                            ],
-                                          ),
-                                        );
-                                      }).toList(),
+                                    child: RadioGroup<TimePrecision>(
+                                      groupValue: _timePrecision,
+                                      onChanged: (value) {
+                                        if (value != null) {
+                                          _onPrecisionChanged(value);
+                                        }
+                                      },
+                                      child: Wrap(
+                                        alignment: WrapAlignment.end,
+                                        spacing: 12,
+                                        runSpacing: 4,
+                                        children: TimePrecision.values.map((p) {
+                                          return InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(24),
+                                            onTap: () => _onPrecisionChanged(p),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Radio<TimePrecision>(
+                                                  value: p,
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  materialTapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                ),
+                                                Text(_precisionLabel(p)),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1284,13 +1286,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                       Container(
                                                         width: 12,
                                                         height: 12,
-                                                        margin:
-                                                            const EdgeInsets.only(
-                                                                right: 6),
+                                                        margin: const EdgeInsets
+                                                            .only(right: 6),
                                                         decoration:
                                                             BoxDecoration(
-                                                                color:
-                                                                    option.color,
+                                                                color: option
+                                                                    .color,
                                                                 shape: BoxShape
                                                                     .circle),
                                                       ),
@@ -1314,211 +1315,220 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ),
                       ),
                       Expanded(
-                        child: ListView.separated(
-                          itemCount: _sources.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final s = _sources[index];
-                            // Get text scale factor for responsive adjustments
-                            final textScale =
-                                MediaQuery.textScalerOf(context).scale(1.0);
-                            // Scale down spacing when text is enlarged
-                            final scaleFactor = textScale > 1.2
-                                ? 0.7
-                                : (textScale > 1.0 ? 0.85 : 1.0);
-                            final iconSize = 20.0 * scaleFactor;
-                            final buttonPadding = 8.0 * scaleFactor;
+                        child: RadioGroup<int>(
+                          groupValue: _selectedIndex,
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _selectedIndex = value);
+                              if (_overlayRunning) {
+                                _updateOverlayForSelected();
+                              }
+                            }
+                          },
+                          child: ListView.separated(
+                            itemCount: _sources.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final s = _sources[index];
+                              // Get text scale factor for responsive adjustments
+                              final textScale =
+                                  MediaQuery.textScalerOf(context).scale(1.0);
+                              // Scale down spacing when text is enlarged
+                              final scaleFactor = textScale > 1.2
+                                  ? 0.7
+                                  : (textScale > 1.0 ? 0.85 : 1.0);
+                              final iconSize = 20.0 * scaleFactor;
+                              final buttonPadding = 8.0 * scaleFactor;
 
-                            return ListTile(
-                              leading: Radio<int>(
+                              return ListTile(
+                                leading: Radio<int>(
                                   value: index,
-                                  groupValue: _selectedIndex,
-                                  onChanged: (v) {
-                                    if (v != null) {
-                                      setState(() => _selectedIndex = v);
-                                      if (_overlayRunning) {
-                                        _updateOverlayForSelected();
-                                      }
-                                    }
-                                  }),
-                              title: Text(
-                                s.isSystem
-                                    ? 'System'
-                                    : (s.alias.isNotEmpty ? s.alias : s.host),
-                                style: const TextStyle(
-                                  fontFeatures: [FontFeature.tabularFigures()],
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _buildColoredTimeText(
-                                      s,
-                                      style: const TextStyle(
-                                        fontFeatures: [
-                                          FontFeature.tabularFigures()
-                                        ],
-                                      ),
-                                    ),
-                                    // 偏移值移到第二行
-                                    if (!s.isSystem)
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(top: 2.0),
-                                        child: Text(
-                                          _formatOffset(s.offsetMillis),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey.shade600,
-                                          ),
+                                title: Text(
+                                  s.isSystem
+                                      ? 'System'
+                                      : (s.alias.isNotEmpty ? s.alias : s.host),
+                                  style: const TextStyle(
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures()
+                                    ],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildColoredTimeText(
+                                        s,
+                                        style: const TextStyle(
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures()
+                                          ],
                                         ),
                                       ),
-                                  ]),
-                              trailing: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerRight,
-                                  child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // 使用更紧凑的按钮设计
-                                        if (s.type == TimeSourceType.ntp)
-                                          Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              onTap: () =>
-                                                  _editServerDialog(index),
-                                              child: Padding(
-                                                padding: EdgeInsets.all(
-                                                    buttonPadding),
-                                                child: Icon(Icons.edit,
-                                                    size: iconSize),
-                                              ),
-                                            ),
-                                          )
-                                        else if (!s.isSystem)
-                                          SizedBox(
-                                              width:
-                                                  iconSize + buttonPadding * 2),
-                                        if (!s.isSystem)
-                                          Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              onTap: () async {
-                                                final removed = _sources[index];
-                                                final removedHost =
-                                                    removed.host;
-                                                setState(() {
-                                                  if (_selectedIndex == index) {
-                                                    _selectedIndex = 0;
-                                                  } else if (_selectedIndex >
-                                                      index) {
-                                                    _selectedIndex -= 1;
-                                                  }
-                                                  _sources.removeAt(index);
-                                                });
-                                                // If any tooltip overlay was showing, remove it
-                                                // to avoid dangling overlays after list changes.
-                                                if (_syncOverlayIndex != null) {
-                                                  _removeSyncOverlay();
-                                                }
-
-                                                // Persist the updated server list (now includes HTTP/NTP).
-                                                await _saveServers();
-
-                                                // If the removed host is a preset, mark it hidden
-                                                // so it won't be re-added on next startup.
-                                                if (_isPresetHost(
-                                                    removedHost)) {
-                                                  _hiddenPresets
-                                                      .add(removedHost);
-                                                  await _saveHiddenPresets();
-                                                }
-                                              },
-                                              child: Padding(
-                                                padding: EdgeInsets.all(
-                                                    buttonPadding),
-                                                child: Icon(Icons.delete,
-                                                    size: iconSize),
-                                              ),
+                                      // 偏移值移到第二行
+                                      if (!s.isSystem)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 2.0),
+                                          child: Text(
+                                            _formatOffset(s.offsetMillis),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade600,
                                             ),
                                           ),
-                                        // 同步时间图标
-                                        if (!s.isSystem && s.lastSync != null)
-                                          () {
-                                            final link =
-                                                _layerLinks.putIfAbsent(
-                                                    index, () => LayerLink());
-                                            return CompositedTransformTarget(
-                                              link: link,
-                                              child: Material(
-                                                color: Colors.transparent,
-                                                child: InkResponse(
-                                                  radius: iconSize * 0.9,
-                                                  onTapDown: (details) =>
-                                                      _toggleSyncOverlay(
-                                                          index,
-                                                          link,
-                                                          details
-                                                              .globalPosition),
-                                                  child: SizedBox(
-                                                    width: iconSize +
-                                                        buttonPadding * 2,
-                                                    height: iconSize +
-                                                        buttonPadding * 2,
-                                                    child: Icon(
-                                                        Icons.error_outline,
-                                                        size: iconSize * 0.9),
-                                                  ),
+                                        ),
+                                    ]),
+                                trailing: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerRight,
+                                    child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // 使用更紧凑的按钮设计
+                                          if (s.type == TimeSourceType.ntp)
+                                            Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                onTap: () =>
+                                                    _editServerDialog(index),
+                                                child: Padding(
+                                                  padding: EdgeInsets.all(
+                                                      buttonPadding),
+                                                  child: Icon(Icons.edit,
+                                                      size: iconSize),
                                                 ),
                                               ),
-                                            );
-                                          }()
-                                        else if (!s.isSystem)
-                                          SizedBox(
-                                              width:
-                                                  iconSize + buttonPadding * 2),
-                                        // 类型标签
-                                        Container(
-                                            margin: EdgeInsets.only(
-                                                left: 4.0 * scaleFactor),
-                                            padding: EdgeInsets.symmetric(
-                                                horizontal: 4 * scaleFactor,
-                                                vertical: 1 * scaleFactor),
-                                            decoration: BoxDecoration(
-                                                color: s.type ==
-                                                        TimeSourceType.ntp
-                                                    ? Colors.blue.shade50
-                                                    : (s.type ==
-                                                            TimeSourceType.http
-                                                        ? Colors.green.shade50
-                                                        : Colors.grey.shade200),
+                                            )
+                                          else if (!s.isSystem)
+                                            SizedBox(
+                                                width: iconSize +
+                                                    buttonPadding * 2),
+                                          if (!s.isSystem)
+                                            Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
                                                 borderRadius:
-                                                    BorderRadius.circular(4)),
-                                            child: Text(
-                                                s.type == TimeSourceType.ntp
-                                                    ? 'ntp'
-                                                    : (s.type ==
-                                                            TimeSourceType.http
-                                                        ? 'http'
-                                                        : 'sys'),
-                                                style: TextStyle(
-                                                    fontSize:
-                                                        9 * scaleFactor))),
-                                      ])),
-                              onTap: () {
-                                setState(() => _selectedIndex = index);
-                                if (_overlayRunning) {
-                                  _updateOverlayForSelected();
-                                }
-                              },
-                            );
-                          },
+                                                    BorderRadius.circular(20),
+                                                onTap: () async {
+                                                  final removed =
+                                                      _sources[index];
+                                                  final removedHost =
+                                                      removed.host;
+                                                  setState(() {
+                                                    if (_selectedIndex ==
+                                                        index) {
+                                                      _selectedIndex = 0;
+                                                    } else if (_selectedIndex >
+                                                        index) {
+                                                      _selectedIndex -= 1;
+                                                    }
+                                                    _sources.removeAt(index);
+                                                  });
+                                                  // If any tooltip overlay was showing, remove it
+                                                  // to avoid dangling overlays after list changes.
+                                                  if (_syncOverlayIndex !=
+                                                      null) {
+                                                    _removeSyncOverlay();
+                                                  }
+
+                                                  // Persist the updated server list (now includes HTTP/NTP).
+                                                  await _saveServers();
+
+                                                  // If the removed host is a preset, mark it hidden
+                                                  // so it won't be re-added on next startup.
+                                                  if (_isPresetHost(
+                                                      removedHost)) {
+                                                    _hiddenPresets
+                                                        .add(removedHost);
+                                                    await _saveHiddenPresets();
+                                                  }
+                                                },
+                                                child: Padding(
+                                                  padding: EdgeInsets.all(
+                                                      buttonPadding),
+                                                  child: Icon(Icons.delete,
+                                                      size: iconSize),
+                                                ),
+                                              ),
+                                            ),
+                                          // 同步时间图标
+                                          if (!s.isSystem && s.lastSync != null)
+                                            () {
+                                              final link =
+                                                  _layerLinks.putIfAbsent(
+                                                      index, () => LayerLink());
+                                              return CompositedTransformTarget(
+                                                link: link,
+                                                child: Material(
+                                                  color: Colors.transparent,
+                                                  child: InkResponse(
+                                                    radius: iconSize * 0.9,
+                                                    onTapDown: (details) =>
+                                                        _toggleSyncOverlay(
+                                                            index,
+                                                            link,
+                                                            details
+                                                                .globalPosition),
+                                                    child: SizedBox(
+                                                      width: iconSize +
+                                                          buttonPadding * 2,
+                                                      height: iconSize +
+                                                          buttonPadding * 2,
+                                                      child: Icon(
+                                                          Icons.error_outline,
+                                                          size: iconSize * 0.9),
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            }()
+                                          else if (!s.isSystem)
+                                            SizedBox(
+                                                width: iconSize +
+                                                    buttonPadding * 2),
+                                          // 类型标签
+                                          Container(
+                                              margin: EdgeInsets.only(
+                                                  left: 4.0 * scaleFactor),
+                                              padding: EdgeInsets.symmetric(
+                                                  horizontal: 4 * scaleFactor,
+                                                  vertical: 1 * scaleFactor),
+                                              decoration: BoxDecoration(
+                                                  color: s.type ==
+                                                          TimeSourceType.ntp
+                                                      ? Colors.blue.shade50
+                                                      : (s.type == TimeSourceType.http
+                                                          ? Colors.green.shade50
+                                                          : Colors
+                                                              .grey.shade200),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4)),
+                                              child: Text(
+                                                  s.type == TimeSourceType.ntp
+                                                      ? 'ntp'
+                                                      : (s.type == TimeSourceType.http
+                                                          ? 'http'
+                                                          : 'sys'),
+                                                  style: TextStyle(
+                                                      fontSize:
+                                                          9 * scaleFactor))),
+                                        ])),
+                                onTap: () {
+                                  setState(() => _selectedIndex = index);
+                                  if (_overlayRunning) {
+                                    _updateOverlayForSelected();
+                                  }
+                                },
+                              );
+                            },
+                          ),
                         ),
                       ),
                       Padding(
