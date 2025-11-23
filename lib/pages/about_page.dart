@@ -17,12 +17,20 @@ class _AboutPageState extends State<AboutPage> {
   final String _repoUrl = 'https://github.com/amchii/FloatingClock';
   bool _loading = false;
   Uint8List? _iconBytes;
+  final ImageProvider _fallbackIcon = const AssetImage('assets/app_icon.webp');
 
   @override
   void initState() {
     super.initState();
     _loadVersion();
     _loadIcon();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 预先加载应用图标资产，避免初始闪烁到默认占位
+    precacheImage(_fallbackIcon, context);
   }
 
   Future<void> _loadIcon() async {
@@ -86,7 +94,21 @@ class _AboutPageState extends State<AboutPage> {
   Widget build(BuildContext context) {
     final displayedVersion = _version.isNotEmpty ? _version : '未知';
 
-    final avatarLabel = _appName.isNotEmpty ? _appName.substring(0, 1) : '时';
+    final iconWidget = ClipOval(
+      child: _iconBytes != null
+          ? Image.memory(
+              _iconBytes!,
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+            )
+          : Image(
+              image: _fallbackIcon,
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+            ),
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('关于')),
@@ -100,23 +122,8 @@ class _AboutPageState extends State<AboutPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 应用图标：优先从平台读取已安装应用的 launcher 图标，失败时使用首字母回退
-                if (_iconBytes != null)
-                  ClipOval(
-                    child: Image.memory(
-                      _iconBytes!,
-                      width: 72,
-                      height: 72,
-                      fit: BoxFit.cover,
-                    ),
-                  )
-                else
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: Theme.of(context).primaryColor,
-                    child: Text(avatarLabel,
-                        style: const TextStyle(fontSize: 28, color: Colors.white)),
-                  ),
+                // 应用图标：优先从平台读取已安装应用的 launcher 图标，失败时使用本地资产回退
+                iconWidget,
                 const SizedBox(height: 12),
                 Text(_appName,
                     style:
