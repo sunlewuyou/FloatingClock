@@ -1342,12 +1342,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               final buttonPadding = 8.0 * scaleFactor;
 
                               return ListTile(
-                                leading: Radio<int>(
-                                  value: index,
+                                leading: SizedBox(
+                                  width: 28.0,
+                                  child: Radio<int>(
+                                    value: index,
+                                  ),
                                 ),
                                 title: Text(
                                   s.isSystem
-                                      ? 'System'
+                                      ? '系统'
                                       : (s.alias.isNotEmpty ? s.alias : s.host),
                                   style: const TextStyle(
                                     fontFeatures: [
