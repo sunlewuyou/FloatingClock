@@ -51,6 +51,7 @@ class FloatingClockService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        checkAndRequestNotificationPermission()  // 检查并请求通知权限
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         createOverlay()
     }
@@ -289,6 +290,16 @@ class FloatingClockService : Service() {
         displayPrecision = newPrecision
         updateIntervalMs = if (newPrecision == DisplayPrecision.CENTISECOND) 10L else 100L
     }
+
+    private fun checkAndRequestNotificationPermission() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            startActivity(intent)  // 引导用户开启通知权限
+        }
+    }
+}
 }
 
 private enum class DisplayPrecision {

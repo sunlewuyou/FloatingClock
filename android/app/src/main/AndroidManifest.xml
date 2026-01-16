@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Foreground service permission (for Android O and above) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Allow UDP/TCP network access for NTP queries from the Flutter layer -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Declare SYSTEM_ALERT_WINDOW to make overlay-related settings more discoverable
