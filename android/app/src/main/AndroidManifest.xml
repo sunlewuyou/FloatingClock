@@ -8,10 +8,13 @@
          on some OEM devices / settings screens. This is a special permission and
          still requires the user to grant it in system settings. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    
     <application
         android:label="悬浮时间"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        
+        <!-- MainActivity settings -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -36,18 +39,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        
         <!-- Service that creates a floating overlay clock. Permission to draw over other apps
              must be granted by the user in system settings. -->
         <service
             android:name=".FloatingClockService"
             android:exported="false"
-            android:foregroundServiceType="shortService" />
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:foregroundServiceType="mediaPlayback|location|dataSync">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </service>
     </application>
+    
     <!-- Required to query other apps that can handle certain intents.
          On Android 11+ (API 30+) package visibility restrictions limit the
          results returned by PackageManager.queryIntentActivities(). The
