@@ -1,6 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Foreground service permission (for Android O and above) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ 特殊用途前台服务权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Allow UDP/TCP network access for NTP queries from the Flutter layer -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -14,7 +17,6 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         
-        <!-- MainActivity settings -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -51,11 +53,11 @@
         <service
             android:name=".FloatingClockService"
             android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE"
-            android:foregroundServiceType="mediaPlayback|location|dataSync">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-            </intent-filter>
+            android:foregroundServiceType="specialUse">
+            <!-- Android 14+ 特殊用途服务说明（可选但推荐） -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="悬浮时钟持续显示时间信息" />
         </service>
     </application>
     
