@@ -25,6 +25,7 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import java.util.*
 
@@ -86,25 +87,54 @@ class FloatingClockService : Service() {
 
     private fun startForegroundWithNotification() {
         val channelId = "floating_clock_channel"
+        
+        // 创建通知渠道
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "悬浮时间", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(
+                channelId, 
+                "悬浮时间", 
+                NotificationManager.IMPORTANCE_LOW
+            )
+            channel.description = "悬浮时钟持续显示时间"
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
         }
 
         val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE 
+        else 
+            PendingIntent.FLAG_UPDATE_CURRENT
+        
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags)
-
+        
+        // 根据 Android 版本设置不同的通知内容
+        val notificationText = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            "悬浮时钟持续运行，用于显示时间信息"
+        } else {
+            "悬浮时间正在运行"
+        }
+        
         val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("悬浮时间")
-            .setContentText("悬浮时间正在运行")
+            .setContentText(notificationText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
-
-        startForeground(1, notification)
+        
+        // 根据 Android 版本使用不同的 startForeground 方法
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+ 使用 specialUse 类型
+            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            startForeground(1, notification, serviceType)
+        } else {
+            // Android 13 及以下
+            startForeground(1, notification)
+        }
     }
 
     private fun createOverlay() {

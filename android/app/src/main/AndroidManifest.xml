@@ -1,16 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Foreground service permission (for Android O and above) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ 特殊用途前台服务权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Allow UDP/TCP network access for NTP queries from the Flutter layer -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Declare SYSTEM_ALERT_WINDOW to make overlay-related settings more discoverable
          on some OEM devices / settings screens. This is a special permission and
          still requires the user to grant it in system settings. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    
     <application
         android:label="悬浮时间"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -35,18 +41,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        
         <!-- Service that creates a floating overlay clock. Permission to draw over other apps
              must be granted by the user in system settings. -->
         <service
             android:name=".FloatingClockService"
             android:exported="false"
-            android:foregroundServiceType="shortService" />
+            android:foregroundServiceType="specialUse">
+            <!-- Android 14+ 特殊用途服务说明（可选但推荐） -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="悬浮时钟持续显示时间信息" />
+        </service>
     </application>
+    
     <!-- Required to query other apps that can handle certain intents.
          On Android 11+ (API 30+) package visibility restrictions limit the
          results returned by PackageManager.queryIntentActivities(). The
