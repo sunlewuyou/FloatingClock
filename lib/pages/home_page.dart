@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:floating_clock/pages/about_page.dart';
 import 'package:floating_clock/models/time_precision.dart';
 import 'package:floating_clock/models/time_source.dart';
+import 'package:floating_clock/services/ntp_service.dart';
+import 'package:floating_clock/services/http_time_service.dart';
 
 // Preset/source identifiers and defaults
 const String _presetNtpAliyun = 'ntp.aliyun.com';
@@ -56,6 +57,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Timer? _uiTimer;
   Timer? _syncTimer;
+  bool _syncInProgress = false;
+  bool _syncRequested = false;
+  final NtpService _ntpService = const NtpService();
+  final HttpTimeService _httpTimeService = const HttpTimeService();
 
   final List<TimeSource> _sources = [];
   int _selectedIndex = 0;
@@ -86,6 +91,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // Load persisted NTP servers and hidden preset list; then ensure presets
     // are present unless the user explicitly hid them.
     _loadSavedServers().then((_) {
+      if (!mounted) return;
       final presets = <TimeSource>[
         TimeSource.ntp(_presetNtpAliyun,
             alias: _presetAliases[_presetNtpAliyun] ?? ''),
@@ -100,35 +106,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (_hiddenPresets.contains(preset.host)) continue;
         final exists =
             _sources.any((s) => s.host == preset.host && s.type == preset.type);
-        if (!exists) {
+        if (!exists && mounted) {
           setState(() => _sources.add(preset));
-
-          // Try an immediate initial sync for the restored preset.
-          if (preset.type == TimeSourceType.ntp) {
-            _queryNtpOffset(preset.host).then((off) {
-              if (off != null) {
-                if (!mounted) return;
-                setState(() {
-                  final s = _sources.firstWhere((x) => x.host == preset.host,
-                      orElse: () => _sources.last);
-                  s.offsetMillis = off;
-                  s.lastSync = DateTime.now();
-                });
-              }
-            });
-          } else if (preset.type == TimeSourceType.http) {
-            _queryHttpOffset(preset).then((off) {
-              if (off != null) {
-                if (!mounted) return;
-                setState(() {
-                  final s = _sources.firstWhere((x) => x.host == preset.host,
-                      orElse: () => _sources.last);
-                  s.offsetMillis = off;
-                  s.lastSync = DateTime.now();
-                });
-              }
-            });
-          }
         }
       }
 
@@ -146,6 +125,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // Ensure any overlay is removed
     _removeSyncOverlay();
     WidgetsBinding.instance.removeObserver(this);
+    _channel.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -417,25 +397,44 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _syncAllServers() async {
-    for (var i = 0; i < _sources.length; i++) {
-      final s = _sources[i];
-      if (s.isSystem) continue;
+    if (!mounted) return;
+    if (_syncInProgress) {
+      _syncRequested = true;
+      return;
+    }
+    _syncInProgress = true;
+    try {
+      // Work on a stable snapshot: users may add/remove sources while a request
+      // is in flight. Only update objects that still belong to the live list.
+      final snapshot = List<TimeSource>.of(_sources);
+      for (final source in snapshot) {
+        if (!mounted) return;
+        if (source.isSystem) continue;
 
-      int? off;
-      if (s.type == TimeSourceType.ntp) {
-        off = await _queryNtpOffset(s.host);
-      } else if (s.type == TimeSourceType.http) {
-        off = await _queryHttpOffset(s);
+        final offset = source.type == TimeSourceType.ntp
+            ? await _queryNtpOffset(source.host)
+            : source.type == TimeSourceType.http
+                ? await _queryHttpOffset(source)
+                : null;
+
+        if (!mounted) return;
+        if (offset != null && _sources.contains(source)) {
+          setState(() {
+            source.offsetMillis = offset;
+            source.lastSync = DateTime.now();
+          });
+          if (_overlayRunning && _sources.indexOf(source) == _selectedIndex) {
+            await _updateOverlayForSelected();
+          }
+        } else if (offset == null) {
+          debugPrint('时间同步失败：${source.host}');
+        }
       }
-
-      if (off != null) {
-        setState(() {
-          s.offsetMillis = off!;
-          s.lastSync = DateTime.now();
-        });
-      } else {
-        debugPrint(
-            '${s.type == TimeSourceType.ntp ? 'NTP' : 'HTTP'}: sync failed for ${s.host}');
+    } finally {
+      _syncInProgress = false;
+      if (_syncRequested && mounted) {
+        _syncRequested = false;
+        unawaited(_syncAllServers());
       }
     }
   }
@@ -443,211 +442,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<int?> _queryNtpOffset(String host,
       {int port = 123,
       Duration timeout = const Duration(seconds: 2),
-      int attempts = 5}) async {
-    List<_NtpSample> samples = [];
-    for (var i = 0; i < attempts; i++) {
-      debugPrint(
-          'NTP: $host - attempt ${i + 1}/$attempts (timeout=${timeout.inMilliseconds}ms)');
-      final s = await _queryNtpOnce(host, port: port, timeout: timeout);
-      if (s != null) {
-        samples.add(s);
-        // if we got a low-delay sample, prefer it and stop early
-        if (s.delay >= 0 && s.delay < 100) {
-          debugPrint(
-              'NTP: $host - early stop on low-delay sample (${s.delay} ms)');
-          break;
-        }
-      }
-      await Future.delayed(const Duration(milliseconds: 80));
-    }
-    if (samples.isEmpty) {
-      debugPrint('NTP: $host - no successful samples after $attempts attempts');
-      return null;
-    }
-    samples.sort((a, b) => a.delay.compareTo(b.delay));
-    // Use a small set of the lowest-delay samples and return their median
-    // offset to reduce sensitivity to a single lucky/erroneous sample.
-    final takeN = samples.length >= 3 ? 3 : samples.length;
-    final bestOffsets = samples.take(takeN).map((s) => s.offset).toList()
-      ..sort();
-    final median = bestOffsets[bestOffsets.length ~/ 2];
-    debugPrint(
-        'NTP: $host - median offset=$median (used $takeN of ${samples.length} samples, best delay=${samples.first.delay} ms)');
-    return median;
+      int attempts = 5}) {
+    return _ntpService.queryOffset(host,
+        port: port, timeout: timeout, attempts: attempts);
   }
 
-  Future<_NtpSample?> _queryNtpOnce(String host,
-      {int port = 123, Duration timeout = const Duration(seconds: 2)}) async {
-    try {
-      // Try IPv4 first, then IPv6, then any. This can help on devices where
-      // one address family is preferred or where the lookup behaves differently.
-      List<InternetAddress> addrs = [];
-      try {
-        addrs =
-            await InternetAddress.lookup(host, type: InternetAddressType.IPv4);
-        if (addrs.isEmpty) {
-          addrs = await InternetAddress.lookup(host,
-              type: InternetAddressType.IPv6);
-        }
-        if (addrs.isEmpty) addrs = await InternetAddress.lookup(host);
-      } catch (e) {
-        debugPrint('NTP: DNS lookup failed for $host: $e');
-        return null;
-      }
-      if (addrs.isEmpty) return null;
-      final addr = addrs.firstWhere((a) => a.type == InternetAddressType.IPv4,
-          orElse: () => addrs.first);
-
-      // Log the address we're about to query and the local transmit timestamp.
-      // `t1ms` is captured immediately before building/sending the packet.
-
-      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      final data = Uint8List(48);
-      data[0] = 0x1B;
-
-      // Use microsecond precision when creating the transmit timestamp to
-      // reduce quantization error on the fractional part.
-      final t1us = DateTime.now().microsecondsSinceEpoch;
-      final t1Sec = (t1us ~/ 1000000) + 2208988800;
-      final t1Frac = ((t1us % 1000000) * 0x100000000) ~/ 1000000;
-
-      final bd =
-          ByteData.view(data.buffer, data.offsetInBytes, data.lengthInBytes);
-      bd.setUint32(40, (t1Sec & 0xffffffff), Endian.big);
-      bd.setUint32(44, (t1Frac & 0xffffffff), Endian.big);
-
-      final completer = Completer<_NtpSample?>();
-
-      debugPrint(
-          'NTP: sending request to $host -> ${addr.address}:$port t1us=$t1us');
-      socket.send(data, addr, port);
-
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = socket.receive();
-          if (dg == null) return;
-          final r = dg.data;
-          if (r.length < 48) return;
-          final t4ms = DateTime.now().millisecondsSinceEpoch;
-          // `dg.data` (a `Uint8List`) may be a view into a larger buffer,
-          // so create a ByteData that starts at the datagram's offset.
-          final rb = ByteData.view(r.buffer, r.offsetInBytes, r.lengthInBytes);
-
-          final secT1 = rb.getUint32(24, Endian.big);
-          final fracT1 = rb.getUint32(28, Endian.big);
-          final secT2 = rb.getUint32(32, Endian.big);
-          final fracT2 = rb.getUint32(36, Endian.big);
-          final secT3 = rb.getUint32(40, Endian.big);
-          final fracT3 = rb.getUint32(44, Endian.big);
-
-          // Basic response validation: mode should be server (4), and stratum
-          // should not be 0 (KOD / Kiss-o'-Death). Also ensure the originate
-          // timestamp matches what we sent to avoid accepting replayed/other
-          // responses from middleboxes.
-          final mode = r[0] & 0x7;
-          final stratum = rb.getUint8(1);
-          if (mode != 4) {
-            debugPrint('NTP: $host - unexpected mode=$mode, ignoring response');
-            return;
-          }
-          if (stratum == 0) {
-            debugPrint('NTP: $host - stratum=0 (KOD?), ignoring response');
-            return;
-          }
-
-          if (secT1 != (t1Sec & 0xffffffff) ||
-              fracT1 != (t1Frac & 0xffffffff)) {
-            debugPrint(
-                'NTP: $host - originate timestamp mismatch, ignoring response (got sec=$secT1 frac=$fracT1, expected sec=${t1Sec & 0xffffffff} frac=${t1Frac & 0xffffffff})');
-            return;
-          }
-
-          int msFromNtp(int sec, int frac) {
-            final unixSec = sec - 2208988800;
-            final ms = unixSec * 1000 + ((frac * 1000) ~/ 0x100000000);
-            return ms;
-          }
-
-          final t1 = msFromNtp(secT1, fracT1);
-          final t2 = msFromNtp(secT2, fracT2);
-          final t3 = msFromNtp(secT3, fracT3);
-          final t4 = t4ms;
-
-          final offset = ((t2 - t1) + (t3 - t4)) ~/ 2;
-          final delay = ((t4 - t1) - (t3 - t2));
-          debugPrint(
-              'NTP: $host recv: t1=$t1 t2=$t2 t3=$t3 t4=$t4 offset=$offset delay=$delay');
-          if (!completer.isCompleted) {
-            completer.complete(_NtpSample(offset: offset, delay: delay));
-          }
-          socket.close();
-        }
-      });
-
-      Future.delayed(timeout, () {
-        if (!completer.isCompleted) {
-          completer.complete(null);
-          socket.close();
-        }
-      });
-
-      return await completer.future;
-    } catch (e) {
-      debugPrint('NTP: $host error: $e');
-      return null;
-    }
-  }
-
-  // Query an HTTP/JSON endpoint that returns a server timestamp (ms since epoch)
-  // in a `data` field. Returns the offset (server_ms - local_ms) or null.
-  Future<int?> _queryHttpOffset(TimeSource s,
-      {Duration timeout = const Duration(seconds: 2)}) async {
-    try {
-      final uri = Uri.parse(s.host);
-      final client = HttpClient();
-
-      final req = await client.getUrl(uri).timeout(timeout);
-      // Apply optional headers (e.g. custom User-Agent for some endpoints)
-      if (s.headers != null) {
-        s.headers!.forEach((k, v) {
-          try {
-            req.headers.set(k, v);
-          } catch (_) {}
-        });
-      }
-
-      final resp = await req.close().timeout(timeout);
-      if (resp.statusCode != 200) {
-        debugPrint('HTTP: ${s.host} status=${resp.statusCode}');
-        client.close(force: true);
-        return null;
-      }
-      final body = await resp.transform(utf8.decoder).join().timeout(timeout);
-      client.close();
-
-      final m = jsonDecode(body);
-      if (m == null || m is! Map || !m.containsKey('data')) {
-        debugPrint('HTTP: ${s.host} unexpected JSON (no data field)');
-        return null;
-      }
-      final dyn = m['data'];
-      int serverMs;
-      if (dyn is int) {
-        serverMs = dyn;
-      } else if (dyn is num) {
-        serverMs = dyn.toInt();
-      } else {
-        serverMs = int.tryParse(dyn.toString()) ?? 0;
-      }
-      if (serverMs == 0) return null;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final offset = serverMs - now;
-      debugPrint('HTTP: ${s.host} serverMs=$serverMs offset=$offset');
-      return offset;
-    } catch (e) {
-      debugPrint('HTTP: ${s.host} error: $e');
-      return null;
-    }
+  Future<int?> _queryHttpOffset(TimeSource source,
+      {Duration timeout = const Duration(seconds: 2)}) {
+    return _httpTimeService.queryOffset(source.host,
+        headers: source.headers, timeout: timeout);
   }
 
   Future<bool> _startOverlayForSelected() async {
@@ -1088,29 +891,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     await _saveHiddenPresets();
 
-    // Persist NTP additions and run an immediate sync for added presets.
+    // Persist first, then use the same serialized synchronization pipeline.
     await _saveServers();
-    for (final s in toAdd) {
-      if (s.type == TimeSourceType.ntp) {
-        final off = await _queryNtpOffset(s.host);
-        if (off != null) {
-          setState(() {
-            final ts = _sources.firstWhere((x) => x.host == s.host);
-            ts.offsetMillis = off;
-            ts.lastSync = DateTime.now();
-          });
-        }
-      } else if (s.type == TimeSourceType.http) {
-        final off = await _queryHttpOffset(s);
-        if (off != null) {
-          setState(() {
-            final ts = _sources.firstWhere((x) => x.host == s.host);
-            ts.offsetMillis = off;
-            ts.lastSync = DateTime.now();
-          });
-        }
-      }
-    }
+    await _syncAllServers();
   }
 
   // Simple container for a single NTP measurement sample
@@ -1564,8 +1347,3 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-class _NtpSample {
-  final int offset;
-  final int delay;
-  _NtpSample({required this.offset, required this.delay});
-}

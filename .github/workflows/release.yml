@@ -37,13 +37,24 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.35.7'
           channel: stable
+          cache: true
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v2
 
+      - name: Flutter version
+        run: flutter --version
+
       - name: Flutter pub get
         run: flutter pub get
+
+      - name: Analyze Dart sources
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test --reporter expanded
 
       - name: Accept Android licenses
         run: |

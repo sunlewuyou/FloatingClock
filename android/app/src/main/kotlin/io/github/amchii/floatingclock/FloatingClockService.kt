@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -34,6 +35,7 @@ class FloatingClockService : Service() {
     private var overlayView: View? = null
     private var containerView: View? = null
     private var textView: TextView? = null
+    private val preferences by lazy { getSharedPreferences("floating_clock_overlay", Context.MODE_PRIVATE) }
     // offset in milliseconds to apply to system time (ntpTime - systemTime)
     private var offsetMillis: Long = 0L
     private var label: String? = null
@@ -53,32 +55,68 @@ class FloatingClockService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        createOverlay()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Update offset/label from Intent extras if provided. Calling startOverlay again
-        // with different extras will update the displayed time source.
-        intent?.let {
-            offsetMillis = it.getLongExtra("offset", 0L)
-            label = it.getStringExtra("label")
-            applyPrecision(it.getStringExtra("precision"))
-            fractionColor = it.getIntExtra("fractionColor", fractionColor)
-        } ?: applyPrecision(null)
-        startForegroundWithNotification()
-        // Avoid scheduling multiple update runnables when startOverlay is
-        // invoked repeatedly to update the offset/label; remove previous
-        // callbacks first.
+        // Android 8+ requires promotion to foreground immediately after a
+        // startForegroundService() call. Do this before touching WindowManager.
+        try {
+            startForegroundWithNotification()
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to enter foreground state", e)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        if (intent != null) {
+            if (intent.hasExtra("offset")) offsetMillis = intent.getLongExtra("offset", 0L)
+            if (intent.hasExtra("label")) label = intent.getStringExtra("label")
+            if (intent.hasExtra("precision")) applyPrecision(intent.getStringExtra("precision"))
+            if (intent.hasExtra("fractionColor")) {
+                fractionColor = intent.getIntExtra("fractionColor", fractionColor)
+            }
+            persistDisplayConfig()
+        } else {
+            restoreDisplayConfig()
+        }
+
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission is not currently granted; stopping service")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (overlayView == null) createOverlay()
+        if (overlayView == null) {
+            Log.e(TAG, "Overlay window could not be created; stopping service")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
-        // Force an immediate update
         updateTime()
         return START_STICKY
+    }
+
+    private fun persistDisplayConfig() {
+        preferences.edit()
+            .putLong("offset", offsetMillis)
+            .putString("label", label)
+            .putString("precision", if (displayPrecision == DisplayPrecision.DECISECOND) "decisecond" else "centisecond")
+            .putInt("fractionColor", fractionColor)
+            .apply()
+    }
+
+    private fun restoreDisplayConfig() {
+        offsetMillis = preferences.getLong("offset", 0L)
+        label = preferences.getString("label", null)
+        applyPrecision(preferences.getString("precision", null))
+        fractionColor = preferences.getInt("fractionColor", fractionColor)
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(updateRunnable)
         removeOverlay()
+        stopForeground(true)
         val intent = Intent("io.github.amchii.floatingclock.OVERLAY_STOPPED")
         intent.setPackage(packageName)
         sendBroadcast(intent)
@@ -138,7 +176,11 @@ class FloatingClockService : Service() {
     }
 
     private fun createOverlay() {
-        if (!Settings.canDrawOverlays(this)) return
+        if (overlayView != null) return
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Cannot create overlay: permission missing")
+            return
+        }
 
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -149,8 +191,8 @@ class FloatingClockService : Service() {
         )
 
         layoutParams.gravity = Gravity.START or Gravity.TOP
-        layoutParams.x = 0
-        layoutParams.y = 200
+        layoutParams.x = preferences.getInt("x", 0)
+        layoutParams.y = preferences.getInt("y", (200 * resources.displayMetrics.density).toInt())
 
         // Horizontal layout: alias (small, left), time (center, monospace), close button (right)
         val container = LinearLayout(this)
@@ -243,7 +285,12 @@ class FloatingClockService : Service() {
                         try {
                             windowManager.updateViewLayout(container, layoutParams)
                         } catch (e: Exception) {
+                            Log.e(TAG, "Unable to move overlay window", e)
                         }
+                        return true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        preferences.edit().putInt("x", layoutParams.x).putInt("y", layoutParams.y).apply()
                         return true
                     }
                 }
@@ -259,7 +306,12 @@ class FloatingClockService : Service() {
         container.tag = aliasTv
         try {
             windowManager.addView(container, layoutParams)
+            Log.i(TAG, "Overlay attached at x=${layoutParams.x}, y=${layoutParams.y}")
         } catch (e: Exception) {
+            Log.e(TAG, "Unable to attach overlay window", e)
+            overlayView = null
+            containerView = null
+            textView = null
         }
     }
 
@@ -267,6 +319,7 @@ class FloatingClockService : Service() {
         try {
             overlayView?.let { windowManager.removeView(it) }
         } catch (e: Exception) {
+            Log.w(TAG, "Unable to remove overlay cleanly", e)
         }
         overlayView = null
         textView = null
@@ -274,12 +327,15 @@ class FloatingClockService : Service() {
     }
 
     private fun updateTime() {
-        textView?.post {
+        // The update runnable already executes on the main looper. Updating
+        // directly avoids queuing another UI callback every 10 milliseconds.
+        try {
             textView?.text = currentTimeText()
             val aliasTv = containerView?.tag as? TextView
             aliasTv?.text = label ?: ""
-            // ensure marquee is (re-)enabled
             aliasTv?.isSelected = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to refresh overlay clock", e)
         }
     }
 
@@ -320,6 +376,8 @@ class FloatingClockService : Service() {
         updateIntervalMs = if (newPrecision == DisplayPrecision.CENTISECOND) 10L else 100L
     }
 }
+
+private const val TAG = "FloatingClockService"
 
 private enum class DisplayPrecision {
     CENTISECOND,
