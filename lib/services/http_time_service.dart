@@ -14,9 +14,12 @@ class HttpTimeService {
     Duration timeout = const Duration(seconds: 2),
   }) async {
     final uri = Uri.tryParse(endpoint);
-    if (uri == null || !uri.hasAuthority ||
+    if (uri == null ||
+        !uri.hasAuthority ||
         (uri.scheme != 'http' && uri.scheme != 'https') ||
-        timeout <= Duration.zero) return null;
+        timeout <= Duration.zero) {
+      return null;
+    }
 
     final client = HttpClient()..connectionTimeout = timeout;
     try {
@@ -43,6 +46,7 @@ class HttpTimeService {
           bytes.addAll(chunk);
         }
       }
+
       await readBody().timeout(timeout);
       final decoded = jsonDecode(utf8.decode(bytes));
       if (decoded is! Map || !decoded.containsKey('data')) return null;

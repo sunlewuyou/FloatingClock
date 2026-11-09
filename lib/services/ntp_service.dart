@@ -40,7 +40,9 @@ class NtpService {
     if (samples.isEmpty) return null;
     samples.sort((a, b) => a.delayMillis.compareTo(b.delayMillis));
     final best = samples.take(samples.length >= 3 ? 3 : samples.length)
-        .map((s) => s.offsetMillis).toList()..sort();
+        .map((s) => s.offsetMillis)
+        .toList()
+      ..sort();
     return best[best.length ~/ 2];
   }
 
@@ -89,22 +91,36 @@ class NtpService {
       final completer = Completer<NtpSample?>();
       socket.send(packet, address, port);
       subscription = socket.listen((event) {
-        if (event != RawSocketEvent.read || completer.isCompleted) return;
+        if (event != RawSocketEvent.read || completer.isCompleted) {
+          return;
+        }
         final datagram = socket?.receive();
-        if (datagram == null || datagram.data.length < 48) return;
-        if (datagram.address.address != address.address || datagram.port != port) return;
+        if (datagram == null || datagram.data.length < 48) {
+          return;
+        }
+        if (datagram.address.address != address.address || datagram.port != port) {
+          return;
+        }
         final bytes = datagram.data;
-        final response = ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes);
+        final response = ByteData.view(
+          bytes.buffer,
+          bytes.offsetInBytes,
+          bytes.lengthInBytes,
+        );
         final mode = bytes[0] & 0x7;
         final version = (bytes[0] >> 3) & 0x7;
         final leap = (bytes[0] >> 6) & 0x3;
         final stratum = response.getUint8(1);
-        if (mode != 4 || version < 3 || leap == 3 || stratum == 0 || stratum > 15) return;
+        if (mode != 4 || version < 3 || leap == 3 || stratum == 0 || stratum > 15) {
+          return;
+        }
 
         final originateSeconds = response.getUint32(24, Endian.big);
         final originateFraction = response.getUint32(28, Endian.big);
         if (originateSeconds != (t1Seconds & 0xffffffff) ||
-            originateFraction != (t1Fraction & 0xffffffff)) return;
+            originateFraction != (t1Fraction & 0xffffffff)) {
+          return;
+        }
 
         final t4Us = wallStartUs + monotonic.elapsedMicroseconds;
         final t1Ms = wallStartUs ~/ 1000;
@@ -120,7 +136,7 @@ class NtpService {
         );
         final t4Ms = t4Us ~/ 1000;
         final offset = ((t2Ms - t1Ms) + (t3Ms - t4Ms)) ~/ 2;
-        final delay = ((t4Ms - t1Ms) - (t3Ms - t2Ms));
+        final delay = (t4Ms - t1Ms) - (t3Ms - t2Ms);
         if (delay >= -2 && delay <= timeout.inMilliseconds * 2) {
           completer.complete(NtpSample(offsetMillis: offset, delayMillis: delay));
         }
@@ -135,7 +151,11 @@ class NtpService {
   }
 
   /// Unfold the 32-bit NTP seconds field into the era nearest the local clock.
-  static int ntpTimestampToUnixMillis(int seconds32, int fraction32, int nearUnixSeconds) {
+  static int ntpTimestampToUnixMillis(
+    int seconds32,
+    int fraction32,
+    int nearUnixSeconds,
+  ) {
     final nearNtpSeconds = nearUnixSeconds + _ntpEpochOffset;
     final era = ((nearNtpSeconds - seconds32) / _eraSeconds).round();
     final fullNtpSeconds = seconds32 + era * _eraSeconds;
