@@ -19,20 +19,17 @@ on:
 permissions:
   contents: read
 
-# 消除 Node 20 deprecation 警告（Node 20 已于 2026-09-23 从 runner 移除）
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-release:
     name: Build & Release APK
-    # 锁定镜像，避开 ubuntu-latest 向 26.04 的滚动迁移
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       LANG: C.UTF-8
-      # JAVA_HOME 由 setup-java 的 java-home 输出提供，不硬编码
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
 
@@ -81,7 +78,7 @@ jobs:
       # Bootstrap them from the same pinned Gradle release before Flutter builds.
       - name: Set up Gradle 8.12 (wrapper bootstrap only)
         if: ${{ !hashFiles('android/gradlew') || !hashFiles('android/gradle/wrapper/gradle-wrapper.jar') }}
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.12'
 
