@@ -21,11 +21,9 @@
 **代码结构**
 
 - `lib/main.dart`：应用入口，仅负责启动 `MyApp` 并引用具体页面。
-- `lib/pages/`：`HomePage`、`AboutPage` 等页面及交互；首页通过服务层调用网络时间同步。
-- `lib/services/`：独立的 NTP/HTTP 时间查询服务。
-- `lib/models/`：定义 `TimePrecision`/`TimeSource` 数据模型及序列化。
-- `android/.../FloatingClockService.kt`：原生悬浮窗、前台服务、显示配置和位置恢复。
-- `test/`：页面、时间源序列化、NTP 时间戳和 HTTP 同步服务测试。
+- `lib/pages/`：`HomePage`、`AboutPage` 等页面及其状态、UI、NTP/HTTP 同步、PlatformChannel、SharedPreferences 等业务逻辑。
+- `lib/models/`：定义 `TimePrecision`/`TimeSource` 以及相关序列化与持久化工具，供界面与服务重用。
+- `test/`：UI 测试位于 `test/widget_test.dart`，使用 `SharedPreferences` mock 并验证关键控件。
 
 **运行与测试**
 
@@ -33,20 +31,17 @@
 - `flutter run`
 - `flutter test test/widget_test.dart`
 
-## 当前维护版本
+## GitHub Actions release build
 
-当前源码版本：**0.5.3**。本次维护重点是时间同步可靠性与 Android 悬浮窗服务生命周期，不改变应用包名和原有用户配置格式。
+The release workflow uses Flutter 3.35.7, JDK 17, Android SDK API 36, AGP 8.9.1 and Gradle 8.12. The project archive may omit the Gradle Wrapper binaries; in that case the workflow bootstraps the Gradle 8.12 wrapper before running analysis, tests and the APK build.
 
-- NTP/HTTP 网络逻辑位于 `lib/services/`。
-- 网络服务与时间源持久化测试位于 `test/`。
-- Android 悬浮窗配置（时间偏移、标签、精度、颜色、位置）由原生服务保存并在系统重建时恢复。
-- 变更详情见 `CHANGELOG.md` 和 `UPGRADE-NOTES.md`。
+Configure these repository Actions secrets before publishing a signed release:
 
-本地验证命令：
+- `KEYSTORE_BASE64`: Base64-encoded Android release keystore.
+- `KEYSTORE_PASSWORD`: keystore password.
+- `KEY_PASSWORD`: signing key password.
+- `KEY_ALIAS`: signing key alias.
 
-```bash
-flutter pub get
-flutter analyze
-flutter test --reporter expanded
-flutter build apk --release
-```
+The workflow produces separate APKs for each supported ABI. It intentionally fails before building if any signing secret is missing or the keystore cannot be opened.
+
+For a local first-time build from the source archive, install Gradle 8.12 and run `gradle wrapper --gradle-version 8.12 --distribution-type all` from the `android/` directory before invoking `flutter run` or `flutter build apk`. The generated wrapper files are no longer ignored by `android/.gitignore`, so they can be committed to the repository for subsequent local builds.

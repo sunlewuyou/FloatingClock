@@ -135,17 +135,12 @@ class MainActivity : FlutterActivity() {
                     if (precision != null) intent.putExtra("precision", precision)
                     if (fractionColor != null) intent.putExtra("fractionColor", fractionColor)
 
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
-                        }
-                        result.success(true)
-                    } catch (e: Exception) {
-                        android.util.Log.e("FloatingClockActivity", "Unable to start overlay service", e)
-                        result.error("OVERLAY_START_FAILED", e.localizedMessage ?: "Unable to start overlay service", null)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
                     }
+                    result.success(true)
                 }
                 "stopOverlay" -> {
                     val intent = Intent(this, FloatingClockService::class.java)

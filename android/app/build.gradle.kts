@@ -11,7 +11,9 @@ plugins {
 android {
     namespace = "io.github.amchii.floatingclock"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "29.0.14033849"
+    // Follow the NDK version pinned by the selected Flutter SDK to avoid
+    // CI/local toolchain drift and unnecessary native-toolchain mismatches.
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

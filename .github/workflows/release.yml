@@ -65,6 +65,32 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      # This source archive originally omitted the Gradle Wrapper files.
+      # Bootstrap them from the same pinned Gradle release before Flutter builds.
+      - name: Set up Gradle 8.12 (wrapper bootstrap only)
+        if: ${{ !hashFiles('android/gradlew') || !hashFiles('android/gradle/wrapper/gradle-wrapper.jar') }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.12'
+
+      - name: Generate missing Gradle Wrapper files
+        if: ${{ !hashFiles('android/gradlew') || !hashFiles('android/gradle/wrapper/gradle-wrapper.jar') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f android/gradlew || ! -s android/gradle/wrapper/gradle-wrapper.jar ]]; then
+            tmp_dir="$(mktemp -d)"
+            trap 'rm -rf "$tmp_dir"' EXIT
+            printf "rootProject.name = 'wrapper-bootstrap'\n" > "$tmp_dir/settings.gradle"
+            printf "\n" > "$tmp_dir/build.gradle"
+            (cd "$tmp_dir" && gradle wrapper --gradle-version 8.12 --distribution-type all)
+            install -m 0755 "$tmp_dir/gradlew" android/gradlew
+            install -m 0644 "$tmp_dir/gradlew.bat" android/gradlew.bat
+            install -m 0644 "$tmp_dir/gradle/wrapper/gradle-wrapper.jar" android/gradle/wrapper/gradle-wrapper.jar
+          fi
+          test -x android/gradlew
+          test -s android/gradle/wrapper/gradle-wrapper.jar
+
       - name: Analyze
         run: flutter analyze
 

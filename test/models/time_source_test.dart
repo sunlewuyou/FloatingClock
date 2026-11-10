@@ -2,22 +2,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:floating_clock/models/time_source.dart';
 
 void main() {
-  group('TimeSource persistence compatibility', () {
-    test('restores legacy NTP records without a type field', () {
-      final source = TimeSource.fromJson({'host': 'pool.ntp.org', 'alias': 'Pool'});
-      expect(source.type, TimeSourceType.ntp);
-      expect(source.host, 'pool.ntp.org');
-      expect(source.alias, 'Pool');
+  group('TimeSource serialization', () {
+    test('round-trips an NTP source', () {
+      final source = TimeSource.ntp('ntp.example.com', alias: 'Example');
+
+      final restored = TimeSource.fromJson(source.toJson());
+
+      expect(restored.type, TimeSourceType.ntp);
+      expect(restored.host, 'ntp.example.com');
+      expect(restored.alias, 'Example');
+      expect(restored.headers, isNull);
     });
 
-    test('round-trips HTTP headers without changing the stored schema', () {
-      final source = TimeSource.http('https://example.test/time',
-          alias: 'Test', headers: const {'X-Test': 'value'});
+    test('round-trips an HTTP source and its headers', () {
+      final source = TimeSource.http(
+        'https://time.example.com/now',
+        alias: 'HTTP time',
+        headers: const {'User-Agent': 'FloatingClock Test'},
+      );
+
       final restored = TimeSource.fromJson(source.toJson());
+
       expect(restored.type, TimeSourceType.http);
-      expect(restored.host, source.host);
-      expect(restored.alias, 'Test');
-      expect(restored.headers, {'X-Test': 'value'});
+      expect(restored.host, 'https://time.example.com/now');
+      expect(restored.alias, 'HTTP time');
+      expect(restored.headers, {'User-Agent': 'FloatingClock Test'});
+    });
+
+    test('reads legacy enum string values', () {
+      final restored = TimeSource.fromJson({
+        'host': 'legacy.example.com',
+        'alias': 'Legacy',
+        'type': 'TimeSourceType.http',
+        'headers': {'X-Test': 'legacy'},
+      });
+
+      expect(restored.type, TimeSourceType.http);
+      expect(restored.headers, {'X-Test': 'legacy'});
+    });
+
+    test('handles malformed persisted values safely', () {
+      final restored = TimeSource.fromJson({
+        'host': 123,
+        'alias': false,
+        'type': 'unknown',
+        'headers': ['not', 'a', 'map'],
+      });
+
+      expect(restored.type, TimeSourceType.ntp);
+      expect(restored.host, isEmpty);
+      expect(restored.alias, isEmpty);
     });
   });
 }
