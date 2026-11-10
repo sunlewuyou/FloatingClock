@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:floating_clock/pages/about_page.dart';
 import 'package:floating_clock/models/time_precision.dart';
 import 'package:floating_clock/models/time_source.dart';
+import 'package:floating_clock/widgets/clock_time_text.dart';
 
 // Preset/source identifiers and defaults
 const String _presetNtpAliyun = 'ntp.aliyun.com';
@@ -55,6 +56,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _channel = MethodChannel('floating_clock');
 
   Timer? _uiTimer;
+  final ValueNotifier<int> _clockTick = ValueNotifier<int>(0);
   Timer? _syncTimer;
   bool _isSyncing = false;
 
@@ -118,6 +120,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     _uiTimer?.cancel();
     _syncTimer?.cancel();
+    _clockTick.dispose();
     // Ensure any overlay is removed
     _removeSyncOverlay();
     WidgetsBinding.instance.removeObserver(this);
@@ -128,6 +131,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshOverlayStatus();
+      if (_uiTimer == null) {
+        _restartUiTimer();
+      }
+    } else if (state == AppLifecycleState.paused) {
+      // The main page is not visible while paused. Stop the high-frequency
+      // Dart timer; the Android overlay service owns its independent clock.
+      _uiTimer?.cancel();
+      _uiTimer = null;
     }
   }
 
@@ -135,7 +146,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _uiTimer?.cancel();
     _uiTimer = Timer.periodic(_uiTickDuration, (_) {
       if (!mounted) return;
-      setState(() {});
+      _clockTick.value++;
     });
   }
 
@@ -845,15 +856,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         });
   }
 
-  ({String prefix, String fraction}) _timePartsForSource(TimeSource s) {
-    final now = DateTime.now().add(Duration(milliseconds: s.offsetMillis));
-    final fraction = _timePrecision == TimePrecision.centisecond
-        ? (now.millisecond ~/ 10).toString().padLeft(2, '0')
-        : (now.millisecond ~/ 100).toString();
-    final prefix =
-        '${_twoDigits(now.hour)}:${_twoDigits(now.minute)}:${_twoDigits(now.second)}';
-    return (prefix: prefix, fraction: fraction);
-  }
 
   String _precisionLabel(TimePrecision precision) {
     switch (precision) {
@@ -884,18 +886,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildColoredTimeText(TimeSource s,
       {TextStyle? style, TextAlign? textAlign}) {
-    final parts = _timePartsForSource(s);
-    final fractionStyle =
-        (style ?? const TextStyle()).copyWith(color: _fractionColor);
-    return Text.rich(
-        TextSpan(children: [
-          TextSpan(text: '${parts.prefix}.'),
-          TextSpan(text: parts.fraction, style: fractionStyle),
-        ]),
-        style: style,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: textAlign);
+    return ClockTimeText(
+      tick: _clockTick,
+      source: s,
+      precision: _timePrecision,
+      fractionColor: _fractionColor,
+      style: style,
+      textAlign: textAlign,
+    );
   }
 
   // Persistence helpers
