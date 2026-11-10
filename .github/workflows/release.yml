@@ -1,3 +1,4 @@
+# .github/workflows/build-release.yml
 name: Build and Release APK
 
 on:
@@ -15,27 +16,37 @@ on:
         type: boolean
         default: false
 
+# 最小权限：默认只读，仅 Release 步骤提权
 permissions:
   contents: read
+
+# 全局启用 Node 24 运行时，消除 Node 20 deprecation 警告
+# （Node 20 已于 2026-09-23 从 runner 移除，此变量同时是未来兼容保险）
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-release:
     name: Build & Release APK
-    runs-on: ubuntu-latest
+    # 锁定镜像：避开 ubuntu-latest 向 26.04 的滚动迁移变量
+    # 验证稳定后可主动改为 ubuntu-26.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       LANG: C.UTF-8
-      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      # 不硬编码 JAVA_HOME，由 setup-java 的 java-home 输出提供
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
 
     steps:
-      - uses: actions/checkout@v5
+      # ---- v5 -> v6：checkout 已原生支持 Node 24 ----
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Set up JDK 17
+        id: setup-java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -51,22 +62,31 @@ jobs:
 
       - name: Show tool versions
         run: |
+          set -euo pipefail
+          # 用 setup-java 提供的路径，避免镜像更新后硬编码路径失效
+          export JAVA_HOME="${{ steps.setup-java.outputs.java-home }}"
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "--- runner ---"
+          echo "Image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          echo "Node: $(node -v 2>/dev/null || echo n/a)"
           flutter --version
           java -version
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
       - name: Ensure Android platform & build-tools (API 36)
         run: |
+          set -euo pipefail
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          # 留痕：签名差异排查时可直接对比两端实际build-tools
+          echo "installed build-tools: $(ls "$ANDROID_SDK_ROOT/build-tools/" | tr '\n' ' ')"
 
       - name: Flutter pub get
         run: flutter pub get
 
-      # This source archive originally omitted the Gradle Wrapper files.
-      # Bootstrap them from the same pinned Gradle release before Flutter builds.
+      # 该源码包历史上缺 Gradle Wrapper，这里从 pinned Gradle 8.12 引导生成
       - name: Set up Gradle 8.12 (wrapper bootstrap only)
         if: ${{ !hashFiles('android/gradlew') || !hashFiles('android/gradle/wrapper/gradle-wrapper.jar') }}
         uses: gradle/actions/setup-gradle@v4
@@ -98,6 +118,7 @@ jobs:
         run: flutter test --reporter expanded
 
       - name: Decode signing keystore
+        id: keystore
         run: |
           set -euo pipefail
           : "${KEYSTORE_BASE64:?missing}" "${KEYSTORE_PASSWORD:?missing}" \
@@ -107,6 +128,14 @@ jobs:
           keytool -list -keystore android/android.jks \
             -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
           echo "✓ keystore OK"
+          # 记录 keystore 自身指纹，供后续与 APK 内证书比对
+          ks_sha256="$(keytool -list -v -keystore android/android.jks \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" \
+            | grep -oE 'SHA-256: *[0-9A-F:]+' | head -1 \
+            | sed 's/SHA-256: *//; s/://g' | tr '[:upper:]' '[:lower:]')"
+          test -n "$ks_sha256" || { echo "无法读取 keystore SHA-256"; exit 1; }
+          echo "sha256=$ks_sha256" >> "$GITHUB_OUTPUT"
+          echo "keystore SHA-256: $ks_sha256"
           {
             echo "storePassword=$KEYSTORE_PASSWORD"
             echo "keyPassword=$KEY_PASSWORD"
@@ -121,6 +150,28 @@ jobs:
 
       - name: Build release APK (split per ABI)
         run: flutter build apk --release --split-per-abi
+
+      # 关键卡点：签名必须与 keystore 一致，且不得是 debug 证书
+      - name: Verify APK signatures
+        env:
+          EXPECT_SHA256: ${{ steps.keystore.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(build/app/outputs/apk/release/app-*-release.apk)
+          ((${#apks[@]})) || { echo "no APK produced"; exit 1; }
+          for apk in "${apks[@]}"; do
+            apksigner verify --verbose --print-certs "$apk" | tee "${apk}.certs"
+            if grep -q 'CN=Android Debug' "${apk}.certs"; then
+              echo "✗ $apk 使用 debug 证书，signingConfig 未生效"
+              exit 1
+            fi
+            grep -qi "$EXPECT_SHA256" "${apk}.certs" || {
+              echo "✗ $apk 证书指纹与 keystore 不一致（期望 $EXPECT_SHA256）"
+              exit 1
+            }
+            echo "✓ $apk 签名校验通过"
+          done
 
       - name: Rename APKs
         id: rename
@@ -138,10 +189,13 @@ jobs:
 
       - name: Clean up secrets
         if: always()
-        run: rm -f android/android.jks android/key.properties
+        run: |
+          rm -f android/android.jks android/key.properties
+          rm -f build/app/outputs/apk/release/app-*.certs
 
+      # v5 -> v7：正式运行在 Node 24，消除 deprecation 警告
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: app-release-apk
           path: build/app/outputs/apk/release/FloatingClock-android-*.apk
