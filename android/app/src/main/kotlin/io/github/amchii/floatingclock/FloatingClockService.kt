@@ -48,6 +48,13 @@ class FloatingClockService : Service() {
     private var fractionColor: Int = Color.parseColor("#C62828")
     private val handler = Handler(Looper.getMainLooper())
     private var lastPermissionCheckElapsedRealtime = 0L
+
+    // Keep the last requested display configuration so Android can recreate a sticky
+    // service after process reclamation without silently reverting to default values.
+    private val configPreferences by lazy {
+        getSharedPreferences("floating_clock_service", Context.MODE_PRIVATE)
+    }
+
     private val updateRunnable = object : Runnable {
         override fun run() {
             updateTime()
@@ -68,11 +75,25 @@ class FloatingClockService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Apply the latest settings before scheduling updates. Repeated start requests
         // update the existing service instead of creating another overlay or timer.
-        intent?.let {
-            offsetMillis = it.getLongExtra("offset", offsetMillis)
-            label = it.getStringExtra("label")
-            applyPrecision(it.getStringExtra("precision"))
-            fractionColor = it.getIntExtra("fractionColor", fractionColor)
+        if (intent == null) {
+            restoreDisplayConfiguration()
+        } else {
+            // Only replace fields explicitly supplied by the caller. This keeps partial
+            // service intents safe and allows an explicit empty label to remain distinct
+            // from an omitted label.
+            if (intent.hasExtra("offset")) {
+                offsetMillis = intent.getLongExtra("offset", offsetMillis)
+            }
+            if (intent.hasExtra("label")) {
+                label = intent.getStringExtra("label")
+            }
+            if (intent.hasExtra("precision")) {
+                applyPrecision(intent.getStringExtra("precision"))
+            }
+            if (intent.hasExtra("fractionColor")) {
+                fractionColor = intent.getIntExtra("fractionColor", fractionColor)
+            }
+            persistDisplayConfiguration()
         }
 
         // A foreground service must promote itself promptly. Do this before touching
@@ -373,6 +394,30 @@ class FloatingClockService : Service() {
         val aliasTv = containerView?.tag as? TextView
         aliasTv?.text = label ?: ""
         aliasTv?.isSelected = true
+    }
+
+    private fun restoreDisplayConfiguration() {
+        offsetMillis = configPreferences.getLong("offset", offsetMillis)
+        label = if (configPreferences.contains("label")) {
+            configPreferences.getString("label", null)
+        } else {
+            label
+        }
+        applyPrecision(configPreferences.getString("precision", null))
+        fractionColor = configPreferences.getInt("fractionColor", fractionColor)
+        Log.i(TAG, "Restored saved overlay display configuration after service recreation")
+    }
+
+    private fun persistDisplayConfiguration() {
+        configPreferences.edit()
+            .putLong("offset", offsetMillis)
+            .putString("label", label)
+            .putString(
+                "precision",
+                if (displayPrecision == DisplayPrecision.CENTISECOND) "centisecond" else "decisecond"
+            )
+            .putInt("fractionColor", fractionColor)
+            .apply()
     }
 
     private fun currentTimeText(): CharSequence {

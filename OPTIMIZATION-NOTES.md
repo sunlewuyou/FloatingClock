@@ -80,3 +80,7 @@ flutter build apk --release --split-per-abi
 
 See `PHASE6-CHANGELOG.md` for preserved channel contracts and the CI/device
 regression checklist.
+
+## 第七阶段：前台服务配置恢复
+
+第七阶段为 `FloatingClockService` 增加最近一次显示配置的持久化。正常 Intent 更新只覆盖明确提供的字段并保存；系统以空 Intent 重建 sticky service 时，从 `floating_clock_service` SharedPreferences 恢复 offset、label、precision 和 fractionColor。未引入新依赖或权限，不更改 Flutter 通道协议、Manifest、CI 工作流或业务时间计算。具体变更和验证边界见 `PHASE7-CHANGELOG.md`。
