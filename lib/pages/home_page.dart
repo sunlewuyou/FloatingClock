@@ -42,7 +42,13 @@ const List<_FractionColorOption> _fractionColorOptions = [
 ];
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({
+    super.key,
+    this.timeSyncService = const TimeSyncService(),
+  });
+
+  /// Injectable so widget tests never start real network requests.
+  final TimeSyncService timeSyncService;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -51,7 +57,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _channel = MethodChannel('floating_clock');
   final TimeSourceRepository _settingsRepository = TimeSourceRepository();
-  final TimeSyncService _timeSyncService = const TimeSyncService();
 
   Timer? _uiTimer;
   final ValueNotifier<int> _clockTick = ValueNotifier<int>(0);
@@ -439,7 +444,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       {int port = 123,
       Duration timeout = const Duration(seconds: 2),
       int attempts = 5}) {
-    return _timeSyncService.queryNtpOffset(
+    return widget.timeSyncService.queryNtpOffset(
       host,
       port: port,
       timeout: timeout,
@@ -449,7 +454,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<int?> _queryHttpOffset(TimeSource source,
       {Duration timeout = const Duration(seconds: 2)}) {
-    return _timeSyncService.queryHttpOffset(source, timeout: timeout);
+    return widget.timeSyncService.queryHttpOffset(source, timeout: timeout);
   }
 
   Future<bool> _startOverlayForSelected() async {
