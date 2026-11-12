@@ -23,10 +23,38 @@ are preserved.
 
 ## Regression tests
 
-`test/widgets_clock_time_text_test.dart` checks centisecond/decisecond output
+`test/widgets/clock_time_text_test.dart` checks centisecond/decisecond output
 format and that a notifier tick refreshes the isolated clock widget.
 
 Run in the project root:
+
+```bash
+flutter pub get
+flutter analyze
+flutter test --reporter expanded
+flutter build apk --release --split-per-abi
+```
+
+
+## Phase 4: persistence boundary and migration safety
+
+- Extracted SharedPreferences access for time sources and display settings into
+  `TimeSourceRepository`; `HomePage` no longer owns JSON persistence details.
+- Preserved the existing storage keys (`time_sources_json`,
+  `ntp_servers_json`, `hidden_presets_json`, `time_precision`, and
+  `fraction_color`).
+- Continue writing both the unified NTP/HTTP source list and the legacy NTP-only
+  list so older app versions can still read NTP entries.
+- Added defensive decoding: malformed rows are skipped, malformed unified
+  payloads fall back to the legacy NTP key, and a valid empty unified list is
+  respected as an intentional empty custom-source list.
+- Added repository tests for unified NTP/HTTP settings, legacy fallback,
+  malformed rows, unsupported color values, hidden preset filtering, and
+  backward-compatible writes.
+- Added the explicit Flutter foundation import for `ValueListenable` in
+  `ClockTimeText`, fixing the analyzer error reported by the release workflow.
+
+Validation commands (must run in the pinned Flutter 3.35.7 CI environment):
 
 ```bash
 flutter pub get

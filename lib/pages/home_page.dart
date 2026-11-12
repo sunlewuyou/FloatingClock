@@ -4,11 +4,11 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:floating_clock/pages/about_page.dart';
 import 'package:floating_clock/models/time_precision.dart';
 import 'package:floating_clock/models/time_source.dart';
 import 'package:floating_clock/widgets/clock_time_text.dart';
+import 'package:floating_clock/repositories/time_source_repository.dart';
 
 // Preset/source identifiers and defaults
 const String _presetNtpAliyun = 'ntp.aliyun.com';
@@ -26,9 +26,6 @@ const Map<String, String> _meituanDefaultHeaders = {
   'User-Agent':
       'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36'
 };
-const String _timeSourcesKey = 'time_sources_json';
-const String _precisionPrefKey = 'time_precision';
-const String _fractionColorPrefKey = 'fraction_color';
 
 class _FractionColorOption {
   final String key;
@@ -54,6 +51,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _channel = MethodChannel('floating_clock');
+  final TimeSourceRepository _settingsRepository = TimeSourceRepository();
 
   Timer? _uiTimer;
   final ValueNotifier<int> _clockTick = ValueNotifier<int>(0);
@@ -162,9 +160,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _persistPrecision(TimePrecision precision) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_precisionPrefKey, precision.storageValue);
-    } catch (_) {}
+      await _settingsRepository.savePrecision(precision);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save time precision: $error\n$stackTrace');
+    }
   }
 
   void _onFractionColorChanged(String key) {
@@ -178,9 +177,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _persistFractionColor(String key) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_fractionColorPrefKey, key);
-    } catch (_) {}
+      await _settingsRepository.saveFractionColor(key);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save fraction color: $error\n$stackTrace');
+    }
   }
 
   _FractionColorOption get _fractionColorOption =>
@@ -896,101 +896,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  // Persistence helpers
+  // Persistence is delegated to TimeSourceRepository so storage migration
+  // and malformed-data handling can be tested independently of the UI.
   Future<void> _loadSavedServers() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final settings = await _settingsRepository.load(
+        validFractionColorKeys:
+            _fractionColorOptions.map((option) => option.key).toSet(),
+      );
       if (!mounted) return;
-      final savedColor = prefs.getString(_fractionColorPrefKey);
-      if (savedColor != null &&
-          _fractionColorOptions.any((opt) => opt.key == savedColor)) {
-        setState(() => _fractionColorKey = savedColor);
-      }
-      final loadedPrecision =
-          precisionFromStorage(prefs.getString(_precisionPrefKey));
-      if (loadedPrecision != _timePrecision) {
-        setState(() => _timePrecision = loadedPrecision);
-      }
-      // First try unified format (all sources)
-      final rawAll = prefs.getString(_timeSourcesKey);
-      if (rawAll != null && rawAll.isNotEmpty) {
-        try {
-          final list = jsonDecode(rawAll) as List<dynamic>;
-          setState(() {
-            for (final it in list) {
-              final m = it as Map<String, dynamic>;
-              final source = TimeSource.fromJson(m);
-              _sources.add(source);
-            }
-          });
-        } catch (_) {
-          // fall back to legacy handling below
-        }
-      } else {
-        // legacy format: NTP-only
-        final raw = prefs.getString('ntp_servers_json');
-        if (raw != null && raw.isNotEmpty) {
-          try {
-            final list = jsonDecode(raw) as List<dynamic>;
-            setState(() {
-              for (final it in list) {
-                final m = it as Map<String, dynamic>;
-                _sources.add(
-                    TimeSource.ntp(m['host'] ?? '', alias: m['alias'] ?? ''));
-              }
-            });
-          } catch (_) {}
-        }
-      }
 
-      // Load hidden preset list (hosts the user explicitly removed).
-      final rawHidden = prefs.getString('hidden_presets_json');
-      if (rawHidden != null && rawHidden.isNotEmpty) {
-        try {
-          final arr = jsonDecode(rawHidden) as List<dynamic>;
-          _hiddenPresets = arr.map((e) => e.toString()).toSet();
-        } catch (_) {
-          _hiddenPresets = <String>{};
+      setState(() {
+        _sources.addAll(settings.sources);
+        _timePrecision = settings.precision;
+        if (settings.fractionColorKey != null) {
+          _fractionColorKey = settings.fractionColorKey!;
         }
-      }
-    } catch (e) {
-      // ignore
+        _hiddenPresets = settings.hiddenPresets;
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load saved clock settings: $error\n$stackTrace');
     }
   }
 
   Future<void> _saveServers() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      // Persist all non-system sources (NTP + HTTP) under a unified key.
-      final listAll = _sources
-          .where((s) => !s.isSystem)
-          .map((s) => {
-                'host': s.host,
-                'alias': s.alias,
-                'type': s.type == TimeSourceType.http ? 'http' : 'ntp',
-                if (s.headers != null) 'headers': s.headers,
-              })
-          .toList();
-      await prefs.setString(_timeSourcesKey, jsonEncode(listAll));
-
-      // Also update legacy NTP-only key for backward compatibility.
-      final listNtp = listAll
-          .where((m) => (m['type'] ?? 'ntp') == 'ntp')
-          .map((m) => {'host': m['host'], 'alias': m['alias']})
-          .toList();
-      await prefs.setString('ntp_servers_json', jsonEncode(listNtp));
-    } catch (e) {
-      // ignore
+      await _settingsRepository.saveSources(_sources);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save time sources: $error\n$stackTrace');
     }
   }
 
   Future<void> _saveHiddenPresets() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-          'hidden_presets_json', jsonEncode(_hiddenPresets.toList()));
-    } catch (e) {
-      // ignore
+      await _settingsRepository.saveHiddenPresets(_hiddenPresets);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save hidden presets: $error\n$stackTrace');
     }
   }
 
