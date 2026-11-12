@@ -62,3 +62,21 @@ flutter analyze
 flutter test --reporter expanded
 flutter build apk --release --split-per-abi
 ```
+
+## Phase 6: Android overlay lifecycle hardening
+
+- Reordered foreground service startup so the service promotes itself before
+  attaching the overlay window.
+- Made repeated service starts reuse the existing overlay and update callback.
+- Added clean stop paths for missing/revoked overlay permission and failed
+  WindowManager attachment.
+- Reduced high-frequency UI queue work by updating overlay TextViews directly
+  on the main-thread Handler rather than calling `View.post()` every tick.
+- Persisted overlay drag coordinates and clamps them to the current display
+  bounds on restore and during movement.
+- Added MethodChannel error results for native service start/stop failures and
+  guarded callback delivery while Flutter is detaching.
+- Added Android M compatibility guards around `Settings.canDrawOverlays`.
+
+See `PHASE6-CHANGELOG.md` for preserved channel contracts and the CI/device
+regression checklist.

@@ -28,10 +28,17 @@ class MainActivity : FlutterActivity() {
     private val overlayStoppedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (::channel.isInitialized) {
-                channel.invokeMethod("onOverlayStopped", null)
+                try {
+                    channel.invokeMethod("onOverlayStopped", null)
+                } catch (_: RuntimeException) {
+                    // The Flutter engine may already be detaching during Activity teardown.
+                }
             }
         }
     }
+
+    private fun hasOverlayPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +65,7 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "hasPermission" -> {
-                    result.success(Settings.canDrawOverlays(this))
+                    result.success(hasOverlayPermission())
                 }
                 "requestPermission" -> {
                     // Try to open the app-specific overlay permission page. Some OEM settings
@@ -70,17 +77,28 @@ class MainActivity : FlutterActivity() {
                                 Uri.fromParts("package", packageName, null)
                             )
                             startActivity(intent)
-                        } catch (e: Exception) {
+                            result.success(true)
+                        } catch (firstError: Exception) {
                             // Fallback: open application details settings so the user can
                             // navigate to special app access -> Display over other apps.
-                            val intent = Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.fromParts("package", packageName, null)
-                            )
-                            startActivity(intent)
+                            try {
+                                val fallbackIntent = Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", packageName, null)
+                                )
+                                startActivity(fallbackIntent)
+                                result.success(true)
+                            } catch (fallbackError: Exception) {
+                                result.error(
+                                    "PERMISSION_SETTINGS_UNAVAILABLE",
+                                    fallbackError.localizedMessage ?: firstError.localizedMessage ?: "Unable to open overlay settings",
+                                    null
+                                )
+                            }
                         }
+                    } else {
+                        result.success(false)
                     }
-                    result.success(true)
                 }
                 "getAppVersion" -> {
                     try {
@@ -117,7 +135,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "startOverlay" -> {
-                    if (!Settings.canDrawOverlays(this)) {
+                    if (!hasOverlayPermission()) {
                         result.error("NO_PERMISSION", "Overlay permission not granted", null)
                         return@setMethodCallHandler
                     }
@@ -135,17 +153,33 @@ class MainActivity : FlutterActivity() {
                     if (precision != null) intent.putExtra("precision", precision)
                     if (fractionColor != null) intent.putExtra("fractionColor", fractionColor)
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } catch (error: Exception) {
+                        result.error(
+                            "OVERLAY_START_FAILED",
+                            error.localizedMessage ?: "Unable to start floating clock service",
+                            null
+                        )
                     }
-                    result.success(true)
                 }
                 "stopOverlay" -> {
-                    val intent = Intent(this, FloatingClockService::class.java)
-                    stopService(intent)
-                    result.success(true)
+                    try {
+                        val intent = Intent(this, FloatingClockService::class.java)
+                        stopService(intent)
+                        result.success(true)
+                    } catch (error: Exception) {
+                        result.error(
+                            "OVERLAY_STOP_FAILED",
+                            error.localizedMessage ?: "Unable to stop floating clock service",
+                            null
+                        )
+                    }
                 }
                 "isOverlayRunning" -> {
                     val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

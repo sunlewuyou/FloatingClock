@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -30,6 +32,10 @@ import androidx.core.app.NotificationCompat
 import java.util.*
 
 class FloatingClockService : Service() {
+    companion object {
+        private const val TAG = "FloatingClockService"
+    }
+
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var containerView: View? = null
@@ -41,6 +47,7 @@ class FloatingClockService : Service() {
     private var updateIntervalMs = 10L
     private var fractionColor: Int = Color.parseColor("#C62828")
     private val handler = Handler(Looper.getMainLooper())
+    private var lastPermissionCheckElapsedRealtime = 0L
     private val updateRunnable = object : Runnable {
         override fun run() {
             updateTime()
@@ -48,31 +55,56 @@ class FloatingClockService : Service() {
         }
     }
 
+    private fun hasOverlayPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        createOverlay()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Update offset/label from Intent extras if provided. Calling startOverlay again
-        // with different extras will update the displayed time source.
+        // Apply the latest settings before scheduling updates. Repeated start requests
+        // update the existing service instead of creating another overlay or timer.
         intent?.let {
-            offsetMillis = it.getLongExtra("offset", 0L)
+            offsetMillis = it.getLongExtra("offset", offsetMillis)
             label = it.getStringExtra("label")
             applyPrecision(it.getStringExtra("precision"))
             fractionColor = it.getIntExtra("fractionColor", fractionColor)
-        } ?: applyPrecision(null)
-        startForegroundWithNotification()
-        // Avoid scheduling multiple update runnables when startOverlay is
-        // invoked repeatedly to update the offset/label; remove previous
-        // callbacks first.
+        }
+
+        // A foreground service must promote itself promptly. Do this before touching
+        // WindowManager so a slow/failing overlay operation cannot delay promotion.
+        try {
+            startForegroundWithNotification()
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to promote overlay service to foreground", error)
+            handler.removeCallbacks(updateRunnable)
+            removeOverlay()
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
+        // Overlay permission can be revoked while the process is alive. Never keep an
+        // invisible foreground service running when the required special permission is gone.
+        if (!hasOverlayPermission()) {
+            Log.w(TAG, "Overlay permission is not granted; stopping service")
+            stopForegroundCompat()
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
+        if (overlayView == null && !createOverlay()) {
+            Log.e(TAG, "Unable to attach overlay window; stopping service")
+            stopForegroundCompat()
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
-        // Force an immediate update
-        updateTime()
         return START_STICKY
     }
 
@@ -83,6 +115,15 @@ class FloatingClockService : Service() {
         intent.setPackage(packageName)
         sendBroadcast(intent)
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            stopForeground(true)
+        }
     }
 
     private fun startForegroundWithNotification() {
@@ -137,8 +178,8 @@ class FloatingClockService : Service() {
         }
     }
 
-    private fun createOverlay() {
-        if (!Settings.canDrawOverlays(this)) return
+    private fun createOverlay(): Boolean {
+        if (!hasOverlayPermission()) return false
 
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -149,8 +190,9 @@ class FloatingClockService : Service() {
         )
 
         layoutParams.gravity = Gravity.START or Gravity.TOP
-        layoutParams.x = 0
-        layoutParams.y = 200
+        val positionPrefs = getSharedPreferences("floating_clock_overlay", Context.MODE_PRIVATE)
+        layoutParams.x = positionPrefs.getInt("x", 0).coerceAtLeast(0)
+        layoutParams.y = positionPrefs.getInt("y", 200).coerceAtLeast(0)
 
         // Horizontal layout: alias (small, left), time (center, monospace), close button (right)
         val container = LinearLayout(this)
@@ -238,12 +280,26 @@ class FloatingClockService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (event.rawX - initialTouchX).toInt()
                         val dy = (event.rawY - initialTouchY).toInt()
-                        layoutParams.x = initialX + dx
-                        layoutParams.y = initialY + dy
+                        val metrics = resources.displayMetrics
+                        val maxX = (metrics.widthPixels - container.width).coerceAtLeast(0)
+                        val maxY = (metrics.heightPixels - container.height).coerceAtLeast(0)
+                        layoutParams.x = (initialX + dx).coerceIn(0, maxX)
+                        layoutParams.y = (initialY + dy).coerceIn(0, maxY)
                         try {
                             windowManager.updateViewLayout(container, layoutParams)
-                        } catch (e: Exception) {
+                        } catch (error: Exception) {
+                            // A revoked overlay permission or invalid window token makes
+                            // the overlay unusable; stop cleanly and notify the host.
+                            Log.e(TAG, "WindowManager.updateViewLayout failed during drag", error)
+                            stopSelf()
                         }
+                        return true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        positionPrefs.edit()
+                            .putInt("x", layoutParams.x)
+                            .putInt("y", layoutParams.y)
+                            .apply()
                         return true
                     }
                 }
@@ -251,22 +307,48 @@ class FloatingClockService : Service() {
             }
         })
 
-        // Keep references to alias and time views so updateTime() can set text.
-        textView = tv
-        containerView = container
-        overlayView = container
-        // store alias view in tag so updateTime can access it without new field
+        // Keep the alias view attached to the container. Publish references only after
+        // addView succeeds, otherwise later updates could target a detached view.
         container.tag = aliasTv
         try {
             windowManager.addView(container, layoutParams)
-        } catch (e: Exception) {
+        } catch (error: Exception) {
+            Log.e(TAG, "WindowManager.addView failed", error)
+            return false
         }
+        textView = tv
+        containerView = container
+        overlayView = container
+        lastPermissionCheckElapsedRealtime = SystemClock.elapsedRealtime()
+        // Clamp restored coordinates after the view has been measured so a screen-size
+        // change cannot leave the clock completely outside the visible display area.
+        container.post {
+            if (overlayView === container) {
+                val metrics = resources.displayMetrics
+                val maxX = (metrics.widthPixels - container.width).coerceAtLeast(0)
+                val maxY = (metrics.heightPixels - container.height).coerceAtLeast(0)
+                val clampedX = layoutParams.x.coerceIn(0, maxX)
+                val clampedY = layoutParams.y.coerceIn(0, maxY)
+                if (clampedX != layoutParams.x || clampedY != layoutParams.y) {
+                    layoutParams.x = clampedX
+                    layoutParams.y = clampedY
+                    try {
+                        windowManager.updateViewLayout(container, layoutParams)
+                        positionPrefs.edit().putInt("x", clampedX).putInt("y", clampedY).apply()
+                    } catch (_: Exception) {
+                        stopSelf()
+                    }
+                }
+            }
+        }
+        return true
     }
 
     private fun removeOverlay() {
         try {
             overlayView?.let { windowManager.removeView(it) }
-        } catch (e: Exception) {
+        } catch (error: Exception) {
+            Log.w(TAG, "Unable to remove overlay window cleanly", error)
         }
         overlayView = null
         textView = null
@@ -274,13 +356,23 @@ class FloatingClockService : Service() {
     }
 
     private fun updateTime() {
-        textView?.post {
-            textView?.text = currentTimeText()
-            val aliasTv = containerView?.tag as? TextView
-            aliasTv?.text = label ?: ""
-            // ensure marquee is (re-)enabled
-            aliasTv?.isSelected = true
+        // updateRunnable and WindowManager callbacks run on the main thread. Updating
+        // views directly avoids enqueueing an additional View.post every 10 ms.
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastPermissionCheckElapsedRealtime >= 1_000L) {
+            lastPermissionCheckElapsedRealtime = nowElapsed
+            if (!hasOverlayPermission()) {
+                Log.w(TAG, "Overlay permission was revoked while service was running")
+                stopSelf()
+                return
+            }
         }
+
+        val timeView = textView ?: return
+        timeView.text = currentTimeText()
+        val aliasTv = containerView?.tag as? TextView
+        aliasTv?.text = label ?: ""
+        aliasTv?.isSelected = true
     }
 
     private fun currentTimeText(): CharSequence {
