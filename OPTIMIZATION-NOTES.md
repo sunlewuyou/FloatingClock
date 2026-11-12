@@ -84,3 +84,11 @@ regression checklist.
 ## 第七阶段：前台服务配置恢复
 
 第七阶段为 `FloatingClockService` 增加最近一次显示配置的持久化。正常 Intent 更新只覆盖明确提供的字段并保存；系统以空 Intent 重建 sticky service 时，从 `floating_clock_service` SharedPreferences 恢复 offset、label、precision 和 fractionColor。未引入新依赖或权限，不更改 Flutter 通道协议、Manifest、CI 工作流或业务时间计算。具体变更和验证边界见 `PHASE7-CHANGELOG.md`。
+
+## 第八阶段：服务状态与显示尺寸变化稳定性
+
+- 使用服务进程内的 `@Volatile` 运行状态标记提供 `isOverlayRunning` 查询，移除对已弃用 `ActivityManager.getRunningServices()` 的依赖。
+- 服务启动成功后才标记运行；启动失败、权限撤销、窗口更新失败及服务销毁时清除运行状态。
+- 保存当前 `WindowManager.LayoutParams`，在显示配置变化后等待悬浮窗完成布局，再将窗口位置限制在当前显示范围并持久化修正后坐标。
+- Flutter 悬浮启动/停止按钮增加操作中状态，防止连续点击造成并发 start/stop 请求。
+- 未更改 MethodChannel 名称/方法、服务 Intent extra、广播 Action、时间同步算法、依赖或 CI 工作流。

@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Color
 import android.os.Build
@@ -34,12 +35,19 @@ import java.util.*
 class FloatingClockService : Service() {
     companion object {
         private const val TAG = "FloatingClockService"
+
+        @Volatile
+        private var running = false
+
+        /** Reliable for callers in this app process; avoids deprecated service enumeration. */
+        fun isServiceRunning(): Boolean = running
     }
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var containerView: View? = null
     private var textView: TextView? = null
+    private var overlayLayoutParams: WindowManager.LayoutParams? = null
     // offset in milliseconds to apply to system time (ntpTime - systemTime)
     private var offsetMillis: Long = 0L
     private var label: String? = null
@@ -103,6 +111,7 @@ class FloatingClockService : Service() {
         } catch (error: Exception) {
             Log.e(TAG, "Unable to promote overlay service to foreground", error)
             handler.removeCallbacks(updateRunnable)
+            running = false
             removeOverlay()
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -112,6 +121,7 @@ class FloatingClockService : Service() {
         // invisible foreground service running when the required special permission is gone.
         if (!hasOverlayPermission()) {
             Log.w(TAG, "Overlay permission is not granted; stopping service")
+            running = false
             stopForegroundCompat()
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -119,6 +129,7 @@ class FloatingClockService : Service() {
 
         if (overlayView == null && !createOverlay()) {
             Log.e(TAG, "Unable to attach overlay window; stopping service")
+            running = false
             stopForegroundCompat()
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -126,16 +137,24 @@ class FloatingClockService : Service() {
 
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
+        running = true
         return START_STICKY
     }
 
     override fun onDestroy() {
+        running = false
         handler.removeCallbacks(updateRunnable)
         removeOverlay()
         val intent = Intent("io.github.amchii.floatingclock.OVERLAY_STOPPED")
         intent.setPackage(packageName)
         sendBroadcast(intent)
         super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Wait for the overlay view to complete its next layout pass before clamping.
+        clampOverlayPosition()
     }
 
     @Suppress("DEPRECATION")
@@ -312,6 +331,7 @@ class FloatingClockService : Service() {
                             // A revoked overlay permission or invalid window token makes
                             // the overlay unusable; stop cleanly and notify the host.
                             Log.e(TAG, "WindowManager.updateViewLayout failed during drag", error)
+                            running = false
                             stopSelf()
                         }
                         return true
@@ -340,29 +360,44 @@ class FloatingClockService : Service() {
         textView = tv
         containerView = container
         overlayView = container
+        overlayLayoutParams = layoutParams
         lastPermissionCheckElapsedRealtime = SystemClock.elapsedRealtime()
-        // Clamp restored coordinates after the view has been measured so a screen-size
-        // change cannot leave the clock completely outside the visible display area.
-        container.post {
-            if (overlayView === container) {
-                val metrics = resources.displayMetrics
-                val maxX = (metrics.widthPixels - container.width).coerceAtLeast(0)
-                val maxY = (metrics.heightPixels - container.height).coerceAtLeast(0)
-                val clampedX = layoutParams.x.coerceIn(0, maxX)
-                val clampedY = layoutParams.y.coerceIn(0, maxY)
-                if (clampedX != layoutParams.x || clampedY != layoutParams.y) {
-                    layoutParams.x = clampedX
-                    layoutParams.y = clampedY
-                    try {
-                        windowManager.updateViewLayout(container, layoutParams)
-                        positionPrefs.edit().putInt("x", clampedX).putInt("y", clampedY).apply()
-                    } catch (_: Exception) {
-                        stopSelf()
-                    }
-                }
+        clampOverlayPosition()
+        return true
+    }
+
+    private fun clampOverlayPosition() {
+        val view = overlayView ?: return
+        val params = overlayLayoutParams ?: return
+        view.post {
+            if (overlayView !== view || overlayLayoutParams !== params) return@post
+
+            val viewWidth = if (view.width > 0) view.width else view.measuredWidth
+            val viewHeight = if (view.height > 0) view.height else view.measuredHeight
+            if (viewWidth <= 0 || viewHeight <= 0) return@post
+
+            val metrics = resources.displayMetrics
+            val maxX = (metrics.widthPixels - viewWidth).coerceAtLeast(0)
+            val maxY = (metrics.heightPixels - viewHeight).coerceAtLeast(0)
+            val clampedX = params.x.coerceIn(0, maxX)
+            val clampedY = params.y.coerceIn(0, maxY)
+            if (clampedX == params.x && clampedY == params.y) return@post
+
+            params.x = clampedX
+            params.y = clampedY
+            try {
+                windowManager.updateViewLayout(view, params)
+                getSharedPreferences("floating_clock_overlay", Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt("x", clampedX)
+                    .putInt("y", clampedY)
+                    .apply()
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to reposition overlay after display change", error)
+                running = false
+                stopSelf()
             }
         }
-        return true
     }
 
     private fun removeOverlay() {
@@ -374,6 +409,7 @@ class FloatingClockService : Service() {
         overlayView = null
         textView = null
         containerView = null
+        overlayLayoutParams = null
     }
 
     private fun updateTime() {
@@ -384,6 +420,7 @@ class FloatingClockService : Service() {
             lastPermissionCheckElapsedRealtime = nowElapsed
             if (!hasOverlayPermission()) {
                 Log.w(TAG, "Overlay permission was revoked while service was running")
+                running = false
                 stopSelf()
                 return
             }

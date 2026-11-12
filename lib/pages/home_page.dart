@@ -69,6 +69,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   // will clear entries from this set.
   Set<String> _hiddenPresets = <String>{};
   bool _overlayRunning = false;
+  bool _overlayOperationInProgress = false;
   bool _pipSupported = false;
   bool _isInPiP = false;
   TimePrecision _timePrecision = TimePrecision.centisecond;
@@ -364,17 +365,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleOverlay() async {
-    if (_overlayRunning) {
-      final success = await _stopOverlay();
+    if (_overlayOperationInProgress) return;
+    setState(() => _overlayOperationInProgress = true);
+    final shouldRunAfterOperation = !_overlayRunning;
+    try {
+      final success = shouldRunAfterOperation
+          ? await _startOverlayForSelected()
+          : await _stopOverlay();
       if (!mounted) return;
       if (success) {
-        setState(() => _overlayRunning = false);
+        setState(() => _overlayRunning = shouldRunAfterOperation);
       }
-    } else {
-      final success = await _startOverlayForSelected();
-      if (!mounted) return;
-      if (success) {
-        setState(() => _overlayRunning = true);
+    } finally {
+      if (mounted) {
+        setState(() => _overlayOperationInProgress = false);
       }
     }
   }
@@ -1278,8 +1282,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           runSpacing: 12,
                           children: [
                             ElevatedButton(
-                                onPressed: _toggleOverlay,
-                                child: Text(_overlayRunning ? '停止悬浮' : '开始悬浮')),
+                                onPressed: _overlayOperationInProgress
+                                    ? null
+                                    : _toggleOverlay,
+                                child: Text(_overlayOperationInProgress
+                                    ? '处理中…'
+                                    : (_overlayRunning ? '停止悬浮' : '开始悬浮'))),
                             ElevatedButton(
                                 onPressed: _pipSupported
                                     ? _enterPictureInPicture

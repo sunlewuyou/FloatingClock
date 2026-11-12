@@ -1,6 +1,5 @@
 package io.github.amchii.floatingclock
 
-import android.app.ActivityManager
 import android.app.PictureInPictureParams
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -182,11 +181,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "isOverlayRunning" -> {
-                    val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                    @Suppress("DEPRECATION")
-                    val running = manager.getRunningServices(Int.MAX_VALUE)
-                        .any { it.service.className == FloatingClockService::class.java.name }
-                    result.success(running)
+                    result.success(FloatingClockService.isServiceRunning())
                 }
                 "isPiPSupported" -> {
                     val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
