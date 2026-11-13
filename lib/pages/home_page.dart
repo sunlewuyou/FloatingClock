@@ -70,6 +70,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Set<String> _hiddenPresets = <String>{};
   bool _overlayRunning = false;
   bool _overlayOperationInProgress = false;
+  // Invalidates an in-flight start/stop result when the native service reports
+  // that it has stopped before the MethodChannel request completes.
+  int _overlayOperationGeneration = 0;
   bool _pipSupported = false;
   bool _isInPiP = false;
   TimePrecision _timePrecision = TimePrecision.centisecond;
@@ -128,6 +131,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // Ensure any overlay is removed
     _removeSyncOverlay();
     WidgetsBinding.instance.removeObserver(this);
+    // Do not leave a callback targeting a State object after this page is gone.
+    _channel.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -341,8 +346,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _handlePlatformCall(MethodCall call) async {
     switch (call.method) {
       case 'onOverlayStopped':
-        if (mounted && _overlayRunning) {
-          setState(() => _overlayRunning = false);
+        if (!mounted) return;
+        // The service can fail asynchronously after startForegroundService()
+        // has already returned. Invalidate the pending request result so it
+        // cannot incorrectly turn the UI back to 'running'.
+        _overlayOperationGeneration++;
+        if (_overlayRunning || _overlayOperationInProgress) {
+          setState(() {
+            _overlayRunning = false;
+            _overlayOperationInProgress = false;
+          });
         }
         break;
       case 'onPiPChanged':
@@ -367,17 +380,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _toggleOverlay() async {
     if (_overlayOperationInProgress) return;
     setState(() => _overlayOperationInProgress = true);
+    final operationGeneration = _overlayOperationGeneration;
     final shouldRunAfterOperation = !_overlayRunning;
     try {
       final success = shouldRunAfterOperation
           ? await _startOverlayForSelected()
           : await _stopOverlay();
       if (!mounted) return;
-      if (success) {
+      if (operationGeneration == _overlayOperationGeneration && success) {
         setState(() => _overlayRunning = shouldRunAfterOperation);
       }
     } finally {
-      if (mounted) {
+      if (mounted && operationGeneration == _overlayOperationGeneration) {
         setState(() => _overlayOperationInProgress = false);
       }
     }

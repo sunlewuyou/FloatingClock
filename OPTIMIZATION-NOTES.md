@@ -92,3 +92,10 @@ regression checklist.
 - 保存当前 `WindowManager.LayoutParams`，在显示配置变化后等待悬浮窗完成布局，再将窗口位置限制在当前显示范围并持久化修正后坐标。
 - Flutter 悬浮启动/停止按钮增加操作中状态，防止连续点击造成并发 start/stop 请求。
 - 未更改 MethodChannel 名称/方法、服务 Intent extra、广播 Action、时间同步算法、依赖或 CI 工作流。
+
+## 第九阶段：Flutter/原生悬浮服务异步状态收敛
+
+- HomePage 销毁时解除 `floating_clock` MethodChannel handler，避免回调继续持有已销毁页面状态。
+- 为悬浮窗启动/停止请求增加 generation 标识；原生服务停止广播到达时使旧请求结果失效，防止异步请求晚返回后把已停止的服务错误显示为运行中。
+- `onOverlayStopped` 统一清理运行状态和操作中状态，覆盖服务启动后异步失败、权限撤销及用户主动停止等情况。
+- 未改变 MethodChannel 名称、方法名、Intent extras、广播 Action、依赖、Manifest 或 GitHub Actions 构建环境。
