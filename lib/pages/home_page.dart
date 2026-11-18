@@ -76,6 +76,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _overlayOperationGeneration = 0;
   bool _pipSupported = false;
   bool _isInPiP = false;
+  bool _pipTaskActive = false;
+  String _pipTaskTargetLabel = '';
   TimePrecision _timePrecision = TimePrecision.centisecond;
   String _fractionColorKey = _fractionColorOptions.first.key;
   // Overlay entry used to show an inline tooltip above other widgets (doesn't
@@ -140,6 +142,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Reconcile with the Android service after returning from the overlay.
+      // This also covers OEMs that delay or coalesce the stopped broadcast.
       _refreshOverlayStatus();
       if (_uiTimer == null) {
         _restartUiTimer();
@@ -348,16 +352,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     switch (call.method) {
       case 'onOverlayStopped':
         if (!mounted) return;
-        // The service can fail asynchronously after startForegroundService()
-        // has already returned. Invalidate the pending request result so it
-        // cannot incorrectly turn the UI back to 'running'.
+        // The native service may be closed from its own close icon while the
+        // Flutter page is backgrounded. Always invalidate pending operations
+        // and publish the stopped state, even if Dart's cached state was stale.
         _overlayOperationGeneration++;
-        if (_overlayRunning || _overlayOperationInProgress) {
-          setState(() {
-            _overlayRunning = false;
-            _overlayOperationInProgress = false;
-          });
-        }
+        setState(() {
+          _overlayRunning = false;
+          _overlayOperationInProgress = false;
+        });
+        break;
+      case 'onScheduledTaskFinished':
+        if (!mounted) return;
+        setState(() {
+          _pipTaskActive = false;
+          _pipTaskTargetLabel = '';
+        });
         break;
       case 'onPiPChanged':
         bool inPiP = false;
@@ -370,6 +379,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
         if (!mounted) return;
         setState(() => _isInPiP = inPiP);
+        if (inPiP && _uiTimer == null) {
+          // Keep the shared clock widget ticking while Android shows PiP.
+          _restartUiTimer();
+        }
         if (!inPiP) {
           // When leaving PiP, refresh overlay status in case service resumed.
           await _refreshOverlayStatus();
@@ -412,6 +425,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     }
     try {
+      // Snapshot the native scheduled-task state before entering PiP so its
+      // compact content can mirror the overlay's optional target-time row.
+      final taskState = await _channel.invokeMapMethod<Object?, Object?>(
+          'getScheduledTaskState');
+      if (mounted && taskState != null) {
+        setState(() {
+          _pipTaskActive = taskState['active'] == true;
+          _pipTaskTargetLabel = taskState['targetLabel']?.toString() ?? '';
+        });
+      }
       final entered = await _channel.invokeMethod<bool>('enterPiP');
       if (entered != null && !entered) {
         if (!mounted) return;
@@ -907,37 +930,62 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ? '系统时间'
           : (source.alias.isNotEmpty ? source.alias : source.host);
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF101214),
         body: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 560),
+            margin: const EdgeInsets.all(6),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xDD17191C),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  if (!source.isSystem)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4.0),
-                      child: Text(
-                        label,
-                        style: const TextStyle(
-                            color: Colors.black54, fontSize: 14),
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
+                  if (!source.isSystem) ...[
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
+                    const SizedBox(height: 3),
+                  ],
                   _buildColoredTimeText(
                     source,
                     style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 32,
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
                       fontFeatures: [FontFeature.tabularFigures()],
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 3, offset: Offset(0, 1))],
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  const SizedBox(height: 2),
+                  if (_pipTaskActive && _pipTaskTargetLabel.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      '点击目标：$_pipTaskTargetLabel',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFFFD180),
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
