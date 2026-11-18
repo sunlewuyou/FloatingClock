@@ -144,7 +144,7 @@ class ScheduledClickExecutionService : Service() {
             .apply()
         val update = Intent(ACTION_TASK_FINISHED).setPackage(packageName)
             .putExtra("success", success).putExtra("status", status)
-            .putLongExtra("dispatchEpochMs", dispatchEpoch).putLongExtra("completedEpochMs", completedEpoch)
+            .putExtra("dispatchEpochMs", dispatchEpoch).putExtra("completedEpochMs", completedEpoch)
         sendBroadcast(update)
         stopForegroundCompat()
     }

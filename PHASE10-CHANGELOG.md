@@ -42,3 +42,10 @@
 - 两项权限展示测试在断言前使用 `WidgetTester.scrollUntilVisible` 将“权限与任务状态”卡片滚动到可见区域，再验证无障碍服务状态。
 - 不修改生产页面布局、权限判断或任务执行逻辑；不通过删除断言或放宽匹配条件规避问题。
 - 此修复针对测试视口/惰性构建问题；仍需在 Flutter 3.35.7 CI 中实际运行测试确认。
+
+### fix4：修复 Android Kotlin Release 编译错误
+
+- `ScheduledClickExecutionService.finish()` 中将不存在的 `Intent.putLongExtra()` 替换为 Android `Intent.putExtra(String, Long)` 重载。
+- 保留 `dispatchEpochMs` 和 `completedEpochMs` 的 Long 类型广播数据，不改变 Flutter/原生广播字段名或数据语义。
+- 扫描全部 Kotlin 源码，未发现其他 `putLongExtra` 调用；Kotlin parser 检查未发现语法解析错误。
+- 当前工作环境未安装 Android SDK/Flutter SDK，不能执行完整 Android Gradle/Kotlin 编译；需以 GitHub Actions Release 构建结果作为最终验证。
