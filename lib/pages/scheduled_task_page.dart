@@ -383,10 +383,22 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
           const Text('权限与任务状态', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           _PermissionRow(label: '悬浮窗权限（屏幕点选）', enabled: _overlayAllowed, actionLabel: '去授权', onTap: () async { await _channel.invokeMethod('requestPermission'); }),
-          if (_gestureApiSupported)
-            _PermissionRow(label: '无障碍点击服务', enabled: _accessibilityEnabled, actionLabel: '去开启', onTap: () async { await _channel.invokeMethod('openAccessibilitySettings'); })
-          else
-            const Text('无障碍手势派发需要 Android 7.0 或更高版本。'),
+          _PermissionRow(
+            label: '无障碍点击服务',
+            enabled: _accessibilityEnabled,
+            supported: _gestureApiSupported,
+            actionLabel: '去开启',
+            onTap: () async {
+              if (_gestureApiSupported) {
+                await _channel.invokeMethod('openAccessibilitySettings');
+              }
+            },
+          ),
+          if (!_gestureApiSupported)
+            const Padding(
+              padding: EdgeInsets.only(left: 32, top: 4),
+              child: Text('无障碍手势派发需要 Android 7.0 或更高版本。'),
+            ),
           _PermissionRow(label: '精确闹钟权限', enabled: _exactAlarmAllowed, actionLabel: '去授权', onTap: () async { await _channel.invokeMethod('requestExactAlarmPermission'); }),
           const Divider(),
           Text('状态：$_taskStatus'),
@@ -412,15 +424,41 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
 }
 
 class _PermissionRow extends StatelessWidget {
-  const _PermissionRow({required this.label, required this.enabled, required this.actionLabel, required this.onTap});
+  const _PermissionRow({
+    required this.label,
+    required this.enabled,
+    required this.actionLabel,
+    required this.onTap,
+    this.supported = true,
+  });
+
   final String label;
   final bool enabled;
   final String actionLabel;
   final VoidCallback onTap;
+  final bool supported;
+
   @override
-  Widget build(BuildContext context) => Row(children: [
-    Icon(enabled ? Icons.check_circle : Icons.warning_amber_rounded, color: enabled ? Colors.green : Colors.orange),
-    const SizedBox(width: 8), Expanded(child: Text('$label：${enabled ? '已授权' : '未授权'}')),
-    if (!enabled) TextButton(onPressed: onTap, child: Text(actionLabel)),
-  ]);
+  Widget build(BuildContext context) {
+    final status = !supported ? '系统不支持' : enabled ? '已授权' : '未授权';
+    final color = !supported
+        ? Theme.of(context).colorScheme.onSurfaceVariant
+        : enabled
+            ? Colors.green
+            : Colors.orange;
+    return Row(children: [
+      Icon(
+        !supported
+            ? Icons.info_outline
+            : enabled
+                ? Icons.check_circle
+                : Icons.warning_amber_rounded,
+        color: color,
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Text('$label：$status')),
+      if (supported && !enabled)
+        TextButton(onPressed: onTap, child: Text(actionLabel)),
+    ]);
+  }
 }

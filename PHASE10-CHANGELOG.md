@@ -27,3 +27,10 @@
 
 - 保留 Flutter 3.35.7 / JDK 17 / API 36 原有 GitHub Actions 工作流，不调整依赖版本。
 - 本地开发环境没有 Flutter、Dart 或 Android SDK，无法执行 `flutter analyze`、`flutter test` 或完整 Gradle APK 构建；这些必须由原工作流验证。
+
+## 第十阶段测试修复（fix2）
+
+- 修复 `scheduled_task_page_test.dart` 中无障碍服务权限行在 API 能力检测异步完成或设备不支持手势派发时可能不可见的问题：权限行现在始终展示，并明确区分“已授权”“未授权”和“系统不支持”。
+- 仅在系统支持无障碍手势派发且服务未授权时显示“去开启”入口；不支持的设备显示 Android 7.0+ 兼容性说明，不再提供无效设置操作。
+- 增加旧 Android 不支持手势派发时的 widget 回归测试。
+- 未修改 Flutter/Gradle/Kotlin/Android 插件版本、依赖锁文件或 GitHub Actions 工作流。

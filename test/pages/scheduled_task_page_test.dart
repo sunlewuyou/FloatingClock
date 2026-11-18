@@ -58,4 +58,43 @@ void main() {
     expect(find.textContaining('无障碍点击服务'), findsOneWidget);
     expect(find.text('开始任务'), findsOneWidget);
   });
+
+  testWidgets('shows accessibility service as unsupported on older Android',
+      (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'isGestureApiSupported':
+          return false;
+        case 'isAccessibilityEnabled':
+        case 'isExactAlarmAllowed':
+        case 'hasPermission':
+          return false;
+        case 'getScheduledTaskState':
+          return <String, Object>{
+            'active': false,
+            'targetSystemEpochMs': 0,
+            'targetLabel': '',
+            'sourceOffsetMillis': 0,
+            'status': '尚未创建任务',
+          };
+        default:
+          return null;
+      }
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ScheduledTaskPage(
+        sourceLabel: '系统时间',
+        offsetMillis: 0,
+        refreshOffset: () async => 0,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('无障碍点击服务：系统不支持'), findsOneWidget);
+    expect(find.text('无障碍手势派发需要 Android 7.0 或更高版本。'),
+        findsOneWidget);
+  });
+
 }
