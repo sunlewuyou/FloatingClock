@@ -220,13 +220,22 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
 
   Future<void> _saveCurrentCoordinate() async {
     final coordinate = _selectedCoordinate;
-    if (coordinate == null) return;
+    if (coordinate == null) {
+      return;
+    }
     final name = _nameController.text.trim();
-    if (name.isEmpty) { _showMessage('请先填写坐标名称'); return; }
+    if (name.isEmpty) {
+      _showMessage('请先填写坐标名称');
+      return;
+    }
     final saved = _SavedCoordinate(name: name, x: coordinate.x, y: coordinate.y, screenWidth: coordinate.screenWidth, screenHeight: coordinate.screenHeight, densityDpi: coordinate.densityDpi, rotation: coordinate.rotation);
     setState(() {
       final index = _coordinates.indexWhere((c) => c.name == name);
-      if (index >= 0) _coordinates[index] = saved; else _coordinates.add(saved);
+      if (index >= 0) {
+        _coordinates[index] = saved;
+      } else {
+        _coordinates.add(saved);
+      }
       _selectedCoordinate = saved;
     });
     await _saveCoordinates();
@@ -333,7 +342,7 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
           Text('屏幕点选后保存多个位置，并可随时切换。上次使用的位置会自动加载。', style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 12),
           Row(children: [Expanded(child: DropdownButtonFormField<_SavedCoordinate>(
-            value: _coordinates.contains(_selectedCoordinate) ? _selectedCoordinate : null,
+            initialValue: _coordinates.contains(_selectedCoordinate) ? _selectedCoordinate : null,
             decoration: const InputDecoration(labelText: '已保存坐标'),
             items: _coordinates.map((c) => DropdownMenuItem(value: c, child: Text('${c.name}  (${c.x}, ${c.y})'))).toList(),
             onChanged: _taskActive ? null : (value) async { setState(() { _selectedCoordinate = value; if (value != null) _nameController.text = value.name; }); await _saveCoordinates(); },
