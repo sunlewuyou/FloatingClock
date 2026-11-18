@@ -149,10 +149,12 @@ class FloatingClockService : Service() {
         running = false
         handler.removeCallbacks(updateRunnable)
         removeOverlay()
-        val intent = Intent("io.github.amchii.floatingclock.OVERLAY_STOPPED")
-        intent.setPackage(packageName)
-        sendBroadcast(intent)
+        notifyOverlayStopped()
         super.onDestroy()
+    }
+
+    private fun notifyOverlayStopped() {
+        sendBroadcast(Intent("io.github.amchii.floatingclock.OVERLAY_STOPPED").setPackage(packageName))
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -315,6 +317,9 @@ class FloatingClockService : Service() {
         container.addView(targetTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         closeBtn.setOnClickListener {
+            // Notify the foreground Flutter page immediately; onDestroy remains
+            // a second, lifecycle-level reconciliation signal.
+            notifyOverlayStopped()
             stopSelf()
         }
 

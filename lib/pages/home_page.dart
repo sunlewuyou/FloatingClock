@@ -341,25 +341,44 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!Platform.isAndroid) return;
     try {
       final running = await _channel.invokeMethod<bool>('isOverlayRunning');
-      if (!mounted) return;
-      if (running != null && running != _overlayRunning) {
+      if (!mounted || running == null) return;
+      if (running != _overlayRunning) {
         setState(() => _overlayRunning = running);
       }
     } catch (_) {}
+  }
+
+  Future<void> _reconcileOverlayAfterStop() async {
+    // stopSelf() is asynchronous. Check a few times so a just-issued stop
+    // cannot briefly flip the button back to "停止悬浮" from stale native state.
+    for (var attempt = 0; attempt < 4; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (!mounted) return;
+      try {
+        final running = await _channel.invokeMethod<bool>('isOverlayRunning');
+        if (running == false) return;
+        if (running == true && attempt == 3 && mounted) {
+          setState(() => _overlayRunning = true);
+        }
+      } catch (_) {
+        return;
+      }
+    }
   }
 
   Future<void> _handlePlatformCall(MethodCall call) async {
     switch (call.method) {
       case 'onOverlayStopped':
         if (!mounted) return;
-        // The native service may be closed from its own close icon while the
-        // Flutter page is backgrounded. Always invalidate pending operations
-        // and publish the stopped state, even if Dart's cached state was stale.
+        // The native close icon emits this immediately. Reflect it without
+        // waiting for Activity lifecycle changes, then reconcile with Android
+        // after the Service has completed stopSelf().
         _overlayOperationGeneration++;
         setState(() {
           _overlayRunning = false;
           _overlayOperationInProgress = false;
         });
+        unawaited(_reconcileOverlayAfterStop());
         break;
       case 'onScheduledTaskFinished':
         if (!mounted) return;
@@ -420,32 +439,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_overlayRunning) {
       final stopped = await _stopOverlay();
       if (!mounted) return;
-      if (stopped) {
-        setState(() => _overlayRunning = false);
-      }
+      if (stopped) setState(() => _overlayRunning = false);
     }
     try {
-      // Snapshot the native scheduled-task state before entering PiP so its
-      // compact content can mirror the overlay's optional target-time row.
       final taskState = await _channel.invokeMapMethod<Object?, Object?>(
           'getScheduledTaskState');
-      if (mounted && taskState != null) {
+      if (!mounted) return;
+      if (taskState != null) {
         setState(() {
           _pipTaskActive = taskState['active'] == true;
           _pipTaskTargetLabel = taskState['targetLabel']?.toString() ?? '';
         });
       }
+
+      // Build the compact clock before Android resizes the Activity into PiP.
+      // Relying only on onPictureInPictureModeChanged can leave the old full
+      // Flutter page captured in the PiP surface on some vendor builds.
+      setState(() => _isInPiP = true);
+      await WidgetsBinding.instance.endOfFrame;
       final entered = await _channel.invokeMethod<bool>('enterPiP');
-      if (entered != null && !entered) {
-        if (!mounted) return;
+      if (entered == false && mounted) {
+        setState(() => _isInPiP = false);
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('无法进入画中画模式，请检查系统设置')));
       }
     } on PlatformException catch (e) {
       debugPrint('enterPiP failed: $e');
       if (!mounted) return;
+      setState(() => _isInPiP = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('进入画中画失败')));
+    } catch (e, stackTrace) {
+      debugPrint('Unexpected PiP error: $e\n$stackTrace');
+      if (mounted) setState(() => _isInPiP = false);
     }
   }
 
@@ -921,58 +947,69 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (_sources.isEmpty) {
         source = TimeSource.system();
       } else {
-        var idx = _selectedIndex;
-        if (idx < 0) idx = 0;
-        if (idx >= _sources.length) idx = _sources.length - 1;
+        final idx = _selectedIndex.clamp(0, _sources.length - 1).toInt();
         source = _sources[idx];
       }
       final label = source.isSystem
           ? '系统时间'
           : (source.alias.isNotEmpty ? source.alias : source.host);
       return Scaffold(
-        backgroundColor: const Color(0xFF101214),
-        body: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 560),
-            margin: const EdgeInsets.all(6),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xDD17191C),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-            ),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
+        backgroundColor: const Color(0xFF080808),
+        body: SafeArea(
+          child: Center(
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.all(4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xDD000000),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  if (!source.isSystem) ...[
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      if (!source.isSystem) ...[
+                        Flexible(
+                          flex: 2,
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        flex: 5,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: _buildColoredTimeText(
+                            source,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 25,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                              fontFeatures: [FontFeature.tabularFigures()],
+                              shadows: [
+                                Shadow(color: Colors.black54, blurRadius: 3, offset: Offset(0, 1)),
+                              ],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                  ],
-                  _buildColoredTimeText(
-                    source,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                      fontFeatures: [FontFeature.tabularFigures()],
-                      shadows: [Shadow(color: Colors.black54, blurRadius: 3, offset: Offset(0, 1))],
-                    ),
-                    textAlign: TextAlign.center,
+                    ],
                   ),
-                  const SizedBox(height: 2),
                   if (_pipTaskActive && _pipTaskTargetLabel.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(
@@ -981,7 +1018,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Color(0xFFFFD180),
-                        fontSize: 11,
+                        fontSize: 10,
                         fontFamily: 'monospace',
                       ),
                     ),
