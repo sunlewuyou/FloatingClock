@@ -51,6 +51,15 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // The permission card is below the initial viewport in the ListView.
+    // Scroll it into the tree before asserting its contents.
+    await tester.scrollUntilVisible(
+      find.text('权限与任务状态'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text('定时点击任务'), findsOneWidget);
     expect(find.textContaining('腾讯时间'), findsOneWidget);
     expect(find.text('秒（00–59）'), findsOneWidget);
@@ -90,6 +99,14 @@ void main() {
         refreshOffset: () async => 0,
       ),
     ));
+    await tester.pumpAndSettle();
+
+    // ListView lazily builds children; bring the permission card into view.
+    await tester.scrollUntilVisible(
+      find.text('权限与任务状态'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
 
     expect(find.textContaining('无障碍点击服务：系统不支持'), findsOneWidget);

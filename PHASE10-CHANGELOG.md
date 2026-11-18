@@ -34,3 +34,11 @@
 - 仅在系统支持无障碍手势派发且服务未授权时显示“去开启”入口；不支持的设备显示 Android 7.0+ 兼容性说明，不再提供无效设置操作。
 - 增加旧 Android 不支持手势派发时的 widget 回归测试。
 - 未修改 Flutter/Gradle/Kotlin/Android 插件版本、依赖锁文件或 GitHub Actions 工作流。
+
+
+### fix3：修复权限卡片 Widget 测试的惰性列表问题
+
+- `ScheduledTaskPage` 使用 `ListView(children: ...)`，列表子项按需构建；权限卡片位于首屏下方时，不会在测试未滚动的情况下进入 Widget 树。
+- 两项权限展示测试在断言前使用 `WidgetTester.scrollUntilVisible` 将“权限与任务状态”卡片滚动到可见区域，再验证无障碍服务状态。
+- 不修改生产页面布局、权限判断或任务执行逻辑；不通过删除断言或放宽匹配条件规避问题。
+- 此修复针对测试视口/惰性构建问题；仍需在 Flutter 3.35.7 CI 中实际运行测试确认。
