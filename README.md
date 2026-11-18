@@ -30,3 +30,18 @@
 - `flutter pub get`
 - `flutter run`
 - `flutter test test/widget_test.dart`
+
+## GitHub Actions release build
+
+The release workflow uses Flutter 3.35.7, JDK 17, Android SDK API 36, AGP 8.9.1 and Gradle 8.12. The project archive may omit the Gradle Wrapper binaries; in that case the workflow bootstraps the Gradle 8.12 wrapper before running analysis, tests and the APK build.
+
+Configure these repository Actions secrets before publishing a signed release:
+
+- `KEYSTORE_BASE64`: Base64-encoded Android release keystore.
+- `KEYSTORE_PASSWORD`: keystore password.
+- `KEY_PASSWORD`: signing key password.
+- `KEY_ALIAS`: signing key alias.
+
+The workflow produces separate APKs for each supported ABI. It intentionally fails before building if any signing secret is missing or the keystore cannot be opened.
+
+For a local first-time build from the source archive, install Gradle 8.12 and run `gradle wrapper --gradle-version 8.12 --distribution-type all` from the `android/` directory before invoking `flutter run` or `flutter build apk`. The generated wrapper files are no longer ignored by `android/.gitignore`, so they can be committed to the repository for subsequent local builds.

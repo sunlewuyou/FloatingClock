@@ -11,6 +11,9 @@
          on some OEM devices / settings screens. This is a special permission and
          still requires the user to grant it in system settings. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
     <application
         android:label="悬浮时间"
@@ -48,6 +51,34 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
+        <service
+            android:name=".ScheduledClickAccessibilityService"
+            android:label="定时点击辅助服务"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/scheduled_click_accessibility_service" />
+        </service>
+        <service android:name=".CoordinatePickerService" android:exported="false" />
+        <service
+            android:name=".ScheduledClickExecutionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="执行用户主动创建的单次定时坐标点击任务" />
+        </service>
+        <receiver android:name=".ScheduledClickReceiver" android:exported="false" />
+        <receiver android:name=".ScheduledClickBootReceiver" android:enabled="true" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Service that creates a floating overlay clock. Permission to draw over other apps
              must be granted by the user in system settings. -->
         <service

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="scheduled_click_accessibility_description">仅在用户设置的时间和坐标执行一次点击，不读取屏幕内容。</string>
+</resources>

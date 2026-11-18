@@ -38,6 +38,7 @@ class _AboutPageState extends State<AboutPage> {
       final channel = MethodChannel('floating_clock');
       final res = await channel.invokeMethod<dynamic>('getAppIcon');
       if (res != null) {
+        if (!mounted) return;
         if (res is Uint8List) {
           setState(() => _iconBytes = res);
         } else if (res is List) {
@@ -54,13 +55,14 @@ class _AboutPageState extends State<AboutPage> {
     try {
       final channel = MethodChannel('floating_clock');
       final v = await channel.invokeMethod<String>('getAppVersion');
+      if (!mounted) return;
       if (v != null && v.isNotEmpty) {
         setState(() => _version = v);
       }
     } catch (_) {
       // ignore errors and leave version empty
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
