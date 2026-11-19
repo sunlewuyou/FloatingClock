@@ -21,6 +21,8 @@ void main() {
           return true;
         case 'hasPermission':
           return true;
+        case 'getCoordinateScreenInfo':
+          return <String, Object>{'screenWidth': 1080, 'screenHeight': 2400, 'densityDpi': 440, 'rotation': 0};
         case 'getScheduledTaskState':
           return <String, Object>{
             'active': false,
@@ -62,11 +64,30 @@ void main() {
 
     expect(find.text('定时点击任务'), findsOneWidget);
     expect(find.textContaining('腾讯时间'), findsOneWidget);
-    expect(find.text('秒（00–59）'), findsOneWidget);
+    expect(find.text('秒（0–59）'), findsOneWidget);
+    expect(find.text('X 坐标'), findsOneWidget);
+    expect(find.text('Y 坐标'), findsOneWidget);
+    expect(find.textContaining('剩余约'), findsNothing);
     expect(find.text('毫秒（000–999）'), findsOneWidget);
     expect(find.textContaining('无障碍点击服务'), findsOneWidget);
     expect(find.text('开始任务'), findsOneWidget);
   });
+
+  testWidgets('manual X/Y entry creates a coordinate using current display metrics', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: ScheduledTaskPage(
+        sourceLabel: '系统时间',
+        offsetMillis: 0,
+        refreshOffset: () async => 0,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), '123');
+    await tester.enterText(find.byType(TextField).at(2), '456');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('当前坐标：X 123，Y 456'), findsOneWidget);
+  });
+
 
   testWidgets('shows accessibility service as unsupported on older Android',
       (tester) async {

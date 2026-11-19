@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
@@ -17,10 +16,11 @@ import android.widget.TextView
 import android.util.DisplayMetrics
 import android.util.Log
 
-/** Full-screen transparent overlay with a draggable target; releasing confirms its center. */
+/** Transparent full-screen coordinate picker. Crosshair follows the finger; release confirms. */
 class CoordinatePickerService : Service() {
     private var windowManager: WindowManager? = null
     private var pickerView: FrameLayout? = null
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -30,111 +30,76 @@ class CoordinatePickerService : Service() {
             return START_NOT_STICKY
         }
         if (pickerView != null) return START_NOT_STICKY
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = realDisplayMetrics()
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.argb(10, 0, 0, 0)) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
+        val density = resources.displayMetrics.density
+        val horizontal = View(this).apply { setBackgroundColor(Color.argb(230, 30, 144, 255)) }
+        val vertical = View(this).apply { setBackgroundColor(Color.argb(230, 30, 144, 255)) }
+        val horizontalLp = FrameLayout.LayoutParams(metrics.widthPixels, maxOf(1, (1.5f * density).toInt()), Gravity.TOP or Gravity.START)
+        val verticalLp = FrameLayout.LayoutParams(maxOf(1, (1.5f * density).toInt()), metrics.heightPixels, Gravity.TOP or Gravity.START)
 
-        val instruction = TextView(this).apply {
-            text = "拖动准星到目标位置，松开即确认"
+        val coordinateHud = TextView(this).apply {
+            text = "X 0  ·  Y 0"
             setTextColor(Color.WHITE)
             textSize = 14f
+            typeface = Typeface.MONOSPACE
             gravity = Gravity.CENTER
-            setPadding(18, 12, 18, 12)
-            background = rounded(Color.argb(215, 25, 28, 32), 18f)
-            typeface = Typeface.DEFAULT_BOLD
+            setPadding((10 * density).toInt(), (7 * density).toInt(), (10 * density).toInt(), (7 * density).toInt())
+            background = rounded(Color.argb(210, 20, 24, 30), 8f)
         }
-        val instructionLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        ).apply { topMargin = (24 * resources.displayMetrics.density).toInt() }
-        root.addView(instruction, instructionLp)
-
+        val hudLp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = (12 * density).toInt()
+        }
         val cancel = TextView(this).apply {
             text = "取消"
             setTextColor(Color.WHITE)
-            textSize = 13f
+            textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(14, 10, 14, 10)
-            background = rounded(Color.argb(220, 150, 45, 45), 16f)
+            setPadding((14 * density).toInt(), (9 * density).toInt(), (14 * density).toInt(), (9 * density).toInt())
+            background = rounded(Color.argb(220, 155, 45, 45), 16f)
             setOnClickListener { stopSelf() }
         }
-        val cancelLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END
-        ).apply {
-            topMargin = (22 * resources.displayMetrics.density).toInt()
-            marginEnd = (14 * resources.displayMetrics.density).toInt()
+        val cancelLp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
+            topMargin = (12 * density).toInt()
+            marginEnd = (12 * density).toInt()
         }
+        root.addView(horizontal, horizontalLp)
+        root.addView(vertical, verticalLp)
+        root.addView(coordinateHud, hudLp)
         root.addView(cancel, cancelLp)
 
-        val markerSize = (58 * resources.displayMetrics.density).toInt()
-        val marker = TextView(this).apply {
-            text = "⊕"
-            setTextColor(Color.WHITE)
-            textSize = 48f
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            typeface = Typeface.DEFAULT_BOLD
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.argb(205, 25, 115, 210))
-                setStroke((2 * resources.displayMetrics.density).toInt(), Color.WHITE)
-            }
-            elevation = 10f
-            contentDescription = "可拖动坐标准星"
+
+        var crossX = metrics.widthPixels / 2
+        var crossY = metrics.heightPixels / 2
+        fun moveCrosshair(x: Int, y: Int) {
+            crossX = x.coerceIn(0, metrics.widthPixels - 1)
+            crossY = y.coerceIn(0, metrics.heightPixels - 1)
+            horizontalLp.topMargin = crossY
+            verticalLp.leftMargin = crossX
+            horizontal.layoutParams = horizontalLp
+            vertical.layoutParams = verticalLp
+            coordinateHud.text = "X $crossX  ·  Y $crossY"
+            sendCoordinateUpdate(crossX, crossY, metrics)
         }
-        val markerLp = FrameLayout.LayoutParams(markerSize, markerSize, Gravity.TOP or Gravity.START).apply {
-            leftMargin = ((metrics.widthPixels - markerSize) / 2).coerceAtLeast(0)
-            topMargin = ((metrics.heightPixels - markerSize) / 2).coerceAtLeast(0)
-        }
-        marker.setOnTouchListener(object : View.OnTouchListener {
-            private var startLeft = 0
-            private var startTop = 0
-            private var downRawX = 0f
-            private var downRawY = 0f
-            override fun onTouch(view: View, event: MotionEvent): Boolean {
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        startLeft = markerLp.leftMargin
-                        startTop = markerLp.topMargin
-                        downRawX = event.rawX
-                        downRawY = event.rawY
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        markerLp.leftMargin = (startLeft + event.rawX - downRawX).toInt()
-                            .coerceIn(0, (metrics.widthPixels - markerSize).coerceAtLeast(0))
-                        markerLp.topMargin = (startTop + event.rawY - downRawY).toInt()
-                            .coerceIn(0, (metrics.heightPixels - markerSize).coerceAtLeast(0))
-                        try {
-                            marker.layoutParams = markerLp
-                            marker.requestLayout()
-                        } catch (error: Exception) {
-                            Log.e(TAG, "Unable to move coordinate marker", error)
-                            stopSelf()
-                        }
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        val x = (markerLp.leftMargin + marker.width / 2).coerceIn(0, metrics.widthPixels - 1)
-                        val y = (markerLp.topMargin + marker.height / 2).coerceIn(0, metrics.heightPixels - 1)
-                        val result = Intent(ACTION_COORDINATE_PICKED).setPackage(packageName)
-                            .putExtra("x", x).putExtra("y", y)
-                            .putExtra("screenWidth", metrics.widthPixels)
-                            .putExtra("screenHeight", metrics.heightPixels)
-                            .putExtra("densityDpi", metrics.densityDpi)
-                            .putExtra("rotation", realDisplayRotation())
-                        sendBroadcast(result)
-                        stopSelf()
-                        return true
-                    }
-                    MotionEvent.ACTION_CANCEL -> return true
+        root.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    moveCrosshair(event.rawX.toInt(), event.rawY.toInt())
+                    true
                 }
-                return true
+                MotionEvent.ACTION_UP -> {
+                    moveCrosshair(event.rawX.toInt(), event.rawY.toInt())
+                    sendCoordinatePicked(crossX, crossY, metrics)
+                    stopSelf()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> true
             }
-        })
-        root.addView(marker, markerLp)
-        root.setOnTouchListener { _, _ -> true }
+        }
+
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
@@ -151,13 +116,30 @@ class CoordinatePickerService : Service() {
             Log.e(TAG, "Unable to show coordinate picker", error)
             stopSelf(startId)
         }
+        moveCrosshair(crossX, crossY)
         return START_NOT_STICKY
     }
 
-    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply {
+
+    private fun sendCoordinateUpdate(x: Int, y: Int, metrics: DisplayMetrics) {
+        sendBroadcast(Intent(ACTION_COORDINATE_MOVED).setPackage(packageName)
+            .putExtra("x", x).putExtra("y", y)
+            .putExtra("screenWidth", metrics.widthPixels).putExtra("screenHeight", metrics.heightPixels)
+            .putExtra("densityDpi", metrics.densityDpi).putExtra("rotation", realDisplayRotation()))
+    }
+
+    private fun sendCoordinatePicked(x: Int, y: Int, metrics: DisplayMetrics) {
+        sendBroadcast(Intent(ACTION_COORDINATE_PICKED).setPackage(packageName)
+            .putExtra("x", x).putExtra("y", y)
+            .putExtra("screenWidth", metrics.widthPixels).putExtra("screenHeight", metrics.heightPixels)
+            .putExtra("densityDpi", metrics.densityDpi).putExtra("rotation", realDisplayRotation()))
+    }
+
+    private fun rounded(color: Int, radius: Float) = android.graphics.drawable.GradientDrawable().apply {
         setColor(color)
         cornerRadius = radius * resources.displayMetrics.density
     }
+
 
     @Suppress("DEPRECATION")
     private fun realDisplayMetrics(): DisplayMetrics {
@@ -166,8 +148,10 @@ class CoordinatePickerService : Service() {
         return metrics
     }
 
+
     @Suppress("DEPRECATION")
     private fun realDisplayRotation(): Int = windowManager?.defaultDisplay?.rotation ?: 0
+
 
     override fun onDestroy() {
         try { pickerView?.let { windowManager?.removeView(it) } } catch (_: Exception) { }
@@ -176,7 +160,9 @@ class CoordinatePickerService : Service() {
         super.onDestroy()
     }
 
+
     companion object {
+        const val ACTION_COORDINATE_MOVED = "io.github.amchii.floatingclock.COORDINATE_MOVED"
         const val ACTION_COORDINATE_PICKED = "io.github.amchii.floatingclock.COORDINATE_PICKED"
         private const val TAG = "CoordinatePicker"
     }

@@ -40,6 +40,19 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
+    private val coordinateMovedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (::channel.isInitialized && intent != null) {
+                try { channel.invokeMethod("onCoordinateMoved", mapOf(
+                    "x" to intent.getIntExtra("x", 0), "y" to intent.getIntExtra("y", 0),
+                    "screenWidth" to intent.getIntExtra("screenWidth", 0),
+                    "screenHeight" to intent.getIntExtra("screenHeight", 0),
+                    "densityDpi" to intent.getIntExtra("densityDpi", 0),
+                    "rotation" to intent.getIntExtra("rotation", 0)
+                )) } catch (_: RuntimeException) { }
+            }
+        }
+    }
     private val taskFinishedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (::channel.isInitialized && intent != null) {
@@ -73,6 +86,7 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(overlayStoppedReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             registerReceiver(coordinateReceiver, IntentFilter(CoordinatePickerService.ACTION_COORDINATE_PICKED), Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(coordinateMovedReceiver, IntentFilter(CoordinatePickerService.ACTION_COORDINATE_MOVED), Context.RECEIVER_NOT_EXPORTED)
             registerReceiver(taskFinishedReceiver, IntentFilter(ScheduledClickExecutionService.ACTION_TASK_FINISHED), Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
@@ -80,12 +94,14 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(coordinateReceiver, IntentFilter(CoordinatePickerService.ACTION_COORDINATE_PICKED))
             @Suppress("DEPRECATION")
+            registerReceiver(coordinateMovedReceiver, IntentFilter(CoordinatePickerService.ACTION_COORDINATE_MOVED))
+            @Suppress("DEPRECATION")
             registerReceiver(taskFinishedReceiver, IntentFilter(ScheduledClickExecutionService.ACTION_TASK_FINISHED))
         }
     }
 
     override fun onDestroy() {
-        listOf(overlayStoppedReceiver, coordinateReceiver, taskFinishedReceiver).forEach { receiver ->
+        listOf(overlayStoppedReceiver, coordinateReceiver, coordinateMovedReceiver, taskFinishedReceiver).forEach { receiver ->
             try { unregisterReceiver(receiver) } catch (_: IllegalArgumentException) { }
         }
         super.onDestroy()
@@ -131,6 +147,11 @@ class MainActivity : FlutterActivity() {
                     } else {
                         result.success(false)
                     }
+                }
+                "getCoordinateScreenInfo" -> {
+                    val metrics = realDisplayMetrics()
+                    result.success(mapOf("screenWidth" to metrics.widthPixels, "screenHeight" to metrics.heightPixels,
+                        "densityDpi" to metrics.densityDpi, "rotation" to realDisplayRotation()))
                 }
                 "isGestureApiSupported" -> result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
                 "isAccessibilityEnabled" -> result.success(isClickAccessibilityEnabled())

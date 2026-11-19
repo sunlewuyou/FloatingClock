@@ -89,13 +89,13 @@ class ScheduledClickExecutionService : Service() {
                 gestureTimeout = null
                 val completedEpoch = System.currentTimeMillis()
                 val deviationText = when {
-                    dispatchError > 0L -> "延迟 ${dispatchError} ms"
-                    dispatchError < 0L -> "提前 ${-dispatchError} ms"
+                    dispatchError > 0L -> "慢了 ${dispatchError} ms"
+                    dispatchError < 0L -> "快了 ${-dispatchError} ms"
                     else -> "准时（0 ms）"
                 }
                 finish(
-                    if (success) "点击已派发，${deviationText}"
-                    else "系统拒绝或取消点击，${deviationText}",
+                    if (success) "点击已触发，${deviationText}"
+                    else "点击未成功，${deviationText}",
                     success,
                     dispatchEpoch,
                     completedEpoch

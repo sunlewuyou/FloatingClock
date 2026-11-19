@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -47,10 +46,12 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
   static const String _lastCoordinateKey = 'scheduled_click_last_coordinate_v1';
 
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _xController = TextEditingController();
+  final TextEditingController _yController = TextEditingController();
   final TextEditingController _secondController = TextEditingController(text: '00');
   final TextEditingController _millisecondController = TextEditingController(text: '000');
   final List<_SavedCoordinate> _coordinates = [];
-  Timer? _refreshTimer;
+  Map<String, int>? _screenInfo;
   _SavedCoordinate? _selectedCoordinate;
   DateTime _targetDate = DateTime.now();
   TimeOfDay _targetTime = TimeOfDay.now();
@@ -71,22 +72,18 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
     WidgetsBinding.instance.addObserver(this);
     _effectiveOffsetMillis = widget.offsetMillis;
     _taskSourceLabel = widget.sourceLabel;
-    final now = DateTime.now().add(const Duration(minutes: 1));
-    _targetDate = DateTime(now.year, now.month, now.day);
-    _targetTime = TimeOfDay(hour: now.hour, minute: now.minute);
+    _initializeDefaultTargetTime();
     _loadSavedState();
     _refreshPermissions();
-    _refreshTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-      if (mounted && _taskActive) setState(() {});
-    });
     _channel.setMethodCallHandler(_handleNativeCall);
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _nameController.dispose();
+    _xController.dispose();
+    _yController.dispose();
     _secondController.dispose();
     _millisecondController.dispose();
     _channel.setMethodCallHandler(null);
@@ -119,7 +116,7 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
 
   Future<void> _handleNativeCall(MethodCall call) async {
     if (!mounted) return;
-    if (call.method == 'onCoordinatePicked' && call.arguments is Map) {
+    if ((call.method == 'onCoordinatePicked' || call.method == 'onCoordinateMoved') && call.arguments is Map) {
       final args = Map<Object?, Object?>.from(call.arguments as Map);
       final x = (args['x'] as num?)?.toInt();
       final y = (args['y'] as num?)?.toInt();
@@ -129,7 +126,10 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
       final rotation = (args['rotation'] as num?)?.toInt();
       if (x != null && y != null && width != null && height != null && density != null && rotation != null) {
         setState(() {
-          _nameController.text = _nameController.text.trim().isEmpty ? '坐标 ${_coordinates.length + 1}' : _nameController.text;
+          if (_nameController.text.trim().isEmpty) _nameController.text = '坐标 ${_coordinates.length + 1}';
+          _xController.text = x.toString();
+          _yController.text = y.toString();
+          _screenInfo = {'screenWidth': width, 'screenHeight': height, 'densityDpi': density, 'rotation': rotation};
           _selectedCoordinate = _SavedCoordinate(name: _nameController.text.trim(), x: x, y: y, screenWidth: width, screenHeight: height, densityDpi: density, rotation: rotation);
         });
       }
@@ -141,6 +141,45 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
         _taskStatus = args['status']?.toString() ?? '任务已结束';
       });
     }
+  }
+
+  Future<void> _initializeDefaultTargetTime() async {
+    var offset = widget.offsetMillis;
+    try { offset = await widget.refreshOffset() ?? offset; } catch (_) {}
+    try {
+      final m = await _channel.invokeMapMethod<Object?, Object?>('getCoordinateScreenInfo');
+      if (m != null) _screenInfo = {
+        'screenWidth': (m['screenWidth'] as num?)?.toInt() ?? 0,
+        'screenHeight': (m['screenHeight'] as num?)?.toInt() ?? 0,
+        'densityDpi': (m['densityDpi'] as num?)?.toInt() ?? 0,
+        'rotation': (m['rotation'] as num?)?.toInt() ?? 0,
+      };
+    } catch (_) {}
+    final activeState = await _channel.invokeMapMethod<Object?, Object?>('getScheduledTaskState');
+    if (activeState?['active'] == true || !mounted) return;
+    final target = DateTime.now().add(Duration(milliseconds: offset)).add(const Duration(minutes: 1));
+    setState(() {
+      _effectiveOffsetMillis = offset;
+      _targetDate = DateTime(target.year, target.month, target.day);
+      _targetTime = TimeOfDay(hour: target.hour, minute: target.minute);
+      _secondController.text = target.second.toString().padLeft(2, '0');
+      _millisecondController.text = target.millisecond.toString().padLeft(3, '0');
+    });
+  }
+
+
+  void _updateManualCoordinate(String axis, String value) {
+    final n = int.tryParse(value);
+    final m = _screenInfo;
+    if (n == null || n < 0 || m == null) return;
+    final w = m['screenWidth'] ?? 0, h = m['screenHeight'] ?? 0;
+    final x = axis == 'x' ? n : int.tryParse(_xController.text) ?? 0;
+    final y = axis == 'y' ? n : int.tryParse(_yController.text) ?? 0;
+    if (w <= 0 || h <= 0 || x >= w || y >= h) return;
+    setState(() => _selectedCoordinate = _SavedCoordinate(
+      name: _nameController.text.trim().isEmpty ? '坐标 ${_coordinates.length + 1}' : _nameController.text.trim(),
+      x: x, y: y, screenWidth: w, screenHeight: h,
+      densityDpi: m['densityDpi'] ?? 0, rotation: m['rotation'] ?? 0));
   }
 
   Future<void> _loadSavedState() async {
@@ -159,6 +198,9 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
       final matches = _coordinates.where((c) => c.name == lastName);
       _selectedCoordinate = matches.isNotEmpty ? matches.first : _coordinates.first;
       _nameController.text = _selectedCoordinate!.name;
+      _xController.text = _selectedCoordinate!.x.toString();
+      _yController.text = _selectedCoordinate!.y.toString();
+      _screenInfo = {'screenWidth': _selectedCoordinate!.screenWidth, 'screenHeight': _selectedCoordinate!.screenHeight, 'densityDpi': _selectedCoordinate!.densityDpi, 'rotation': _selectedCoordinate!.rotation};
     }
     try {
       final state = await _channel.invokeMapMethod<Object?, Object?>('getScheduledTaskState');
@@ -167,7 +209,7 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
           _taskActive = state['active'] == true;
           _effectiveOffsetMillis = (state['sourceOffsetMillis'] as num?)?.toInt() ?? widget.offsetMillis;
           final savedTarget = (state['targetSystemEpochMs'] as num?)?.toInt();
-          if (savedTarget != null && savedTarget > 0) {
+          if (_taskActive && savedTarget != null && savedTarget > 0) {
             final sourceTarget = DateTime.fromMillisecondsSinceEpoch(savedTarget + _effectiveOffsetMillis);
             _targetDate = DateTime(sourceTarget.year, sourceTarget.month, sourceTarget.day);
             _targetTime = TimeOfDay(hour: sourceTarget.hour, minute: sourceTarget.minute);
@@ -223,6 +265,12 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
     if (coordinate == null) {
       return;
     }
+    final typedX = int.tryParse(_xController.text);
+    final typedY = int.tryParse(_yController.text);
+    if (typedX == null || typedY == null || typedX != coordinate.x || typedY != coordinate.y || typedX < 0 || typedY < 0 || typedX >= coordinate.screenWidth || typedY >= coordinate.screenHeight) {
+      _showMessage('请检查 X、Y 坐标，确保输入有效且在屏幕范围内');
+      return;
+    }
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       _showMessage('请先填写坐标名称');
@@ -276,9 +324,9 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
       final millisecondText = _millisecondController.text.trim();
       final secondValue = int.tryParse(secondText);
       final millisecondValue = int.tryParse(millisecondText);
-      if (secondValue == null || secondText.length != 2 || secondValue < 0 || secondValue > 59 ||
+      if (secondValue == null || secondText.isEmpty || secondText.length > 2 || secondValue < 0 || secondValue > 59 ||
           millisecondValue == null || millisecondValue < 0 || millisecondValue > 999 || millisecondText.length != 3) {
-        _showMessage('请填写有效的秒（00–59）和三位毫秒（000–999）');
+        _showMessage('请填写有效的秒（0–59）和三位毫秒（000–999）');
         return;
       }
       if (!_exactAlarmAllowed) {
@@ -287,7 +335,10 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
         return;
       }
       final coordinate = _selectedCoordinate;
-      if (coordinate == null || !_coordinates.contains(coordinate)) { _showMessage('请先点选坐标，填写名称并保存后再开始任务'); return; }
+      final typedX = int.tryParse(_xController.text);
+      final typedY = int.tryParse(_yController.text);
+      if (coordinate == null || !_coordinates.contains(coordinate)) { _showMessage('请先选取或输入坐标，填写名称并保存后再开始任务'); return; }
+      if (typedX != coordinate.x || typedY != coordinate.y || typedX == null || typedY == null) { _showMessage('坐标输入与当前保存值不一致，请先保存坐标'); return; }
       if (_nameController.text.trim() != coordinate.name) { _showMessage('坐标名称已修改，请先保存名称变更'); return; }
       final freshOffset = await widget.refreshOffset();
       if (freshOffset == null) {
@@ -332,7 +383,6 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
   @override
   Widget build(BuildContext context) {
     final target = _targetSourceDateTime;
-    final remaining = target.millisecondsSinceEpoch - _effectiveOffsetMillis - DateTime.now().millisecondsSinceEpoch;
     return Scaffold(
       appBar: AppBar(title: const Text('定时点击任务')),
       body: SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
@@ -345,13 +395,27 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
             initialValue: _coordinates.contains(_selectedCoordinate) ? _selectedCoordinate : null,
             decoration: const InputDecoration(labelText: '已保存坐标'),
             items: _coordinates.map((c) => DropdownMenuItem(value: c, child: Text('${c.name}  (${c.x}, ${c.y})'))).toList(),
-            onChanged: _taskActive ? null : (value) async { setState(() { _selectedCoordinate = value; if (value != null) _nameController.text = value.name; }); await _saveCoordinates(); },
+            onChanged: _taskActive ? null : (value) async { setState(() { _selectedCoordinate = value; if (value != null) { _nameController.text = value.name; _xController.text = value.x.toString(); _yController.text = value.y.toString(); _screenInfo = {'screenWidth': value.screenWidth, 'screenHeight': value.screenHeight, 'densityDpi': value.densityDpi, 'rotation': value.rotation}; } }); await _saveCoordinates(); },
           )), IconButton(tooltip: '删除坐标', onPressed: _taskActive || _selectedCoordinate == null ? null : () async {
-            setState(() { _coordinates.removeWhere((c) => c.name == _selectedCoordinate!.name); _selectedCoordinate = _coordinates.isEmpty ? null : _coordinates.first; });
+            setState(() {
+              _coordinates.removeWhere((c) => c.name == _selectedCoordinate!.name);
+              _selectedCoordinate = _coordinates.isEmpty ? null : _coordinates.first;
+              _nameController.text = _selectedCoordinate?.name ?? '';
+              _xController.text = _selectedCoordinate?.x.toString() ?? '';
+              _yController.text = _selectedCoordinate?.y.toString() ?? '';
+              final c = _selectedCoordinate;
+              _screenInfo = c == null ? _screenInfo : {'screenWidth': c.screenWidth, 'screenHeight': c.screenHeight, 'densityDpi': c.densityDpi, 'rotation': c.rotation};
+            });
             await _saveCoordinates();
           }, icon: const Icon(Icons.delete_outline))]),
           const SizedBox(height: 8),
           TextField(controller: _nameController, enabled: !_taskActive, decoration: const InputDecoration(labelText: '坐标名称', hintText: '例如：确认按钮')),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _xController, enabled: !_taskActive, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'X 坐标', hintText: '0'), onChanged: (v) => _updateManualCoordinate('x', v))),
+            const SizedBox(width: 12),
+            Expanded(child: TextField(controller: _yController, enabled: !_taskActive, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Y 坐标', hintText: '0'), onChanged: (v) => _updateManualCoordinate('y', v))),
+          ]),
           const SizedBox(height: 8),
           if (_selectedCoordinate != null) Text('当前坐标：X ${_selectedCoordinate!.x}，Y ${_selectedCoordinate!.y}（${_selectedCoordinate!.screenWidth}×${_selectedCoordinate!.screenHeight}）'),
           Wrap(spacing: 8, children: [
@@ -364,15 +428,15 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
           const SizedBox(height: 8),
           Text('时间基准：${_taskActive ? _taskSourceLabel : widget.sourceLabel}（创建任务前重新校时）'),
           ListTile(contentPadding: EdgeInsets.zero, title: const Text('日期'), subtitle: Text('${_targetDate.year}-${_targetDate.month.toString().padLeft(2, '0')}-${_targetDate.day.toString().padLeft(2, '0')}'), trailing: const Icon(Icons.calendar_month), onTap: _taskActive ? null : () async {
-            final picked = await showDatePicker(context: context, initialDate: _targetDate, firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 365 * 3)));
+            final picked = await showDatePicker(context: context, locale: const Locale('zh', 'CN'), initialDate: _targetDate, firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 365 * 3)));
             if (picked != null) setState(() => _targetDate = picked);
           }),
           ListTile(contentPadding: EdgeInsets.zero, title: const Text('时分'), subtitle: Text(_targetTime.format(context)), trailing: const Icon(Icons.schedule), onTap: _taskActive ? null : () async {
-            final picked = await showTimePicker(context: context, initialTime: _targetTime);
+            final picked = await showTimePicker(context: context, initialTime: _targetTime, builder: (ctx, child) => Localizations.override(context: ctx, locale: const Locale('zh', 'CN'), child: child!));
             if (picked != null) setState(() => _targetTime = picked);
           }),
           Row(children: [
-            Expanded(child: TextField(controller: _secondController, enabled: !_taskActive, keyboardType: TextInputType.number, maxLength: 2, decoration: const InputDecoration(labelText: '秒（00–59）', counterText: '', hintText: '00'), onChanged: (_) => setState(() {}))),
+            Expanded(child: TextField(controller: _secondController, enabled: !_taskActive, keyboardType: TextInputType.number, maxLength: 2, decoration: const InputDecoration(labelText: '秒（0–59）', counterText: '', hintText: '0'), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 16),
             Expanded(child: TextField(controller: _millisecondController, enabled: !_taskActive, keyboardType: TextInputType.number, maxLength: 3, decoration: const InputDecoration(labelText: '毫秒（000–999）', counterText: '', hintText: '985'), onChanged: (_) => setState(() {}))),
           ]),
@@ -405,7 +469,6 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
           if (_taskActive) const Text('任务已创建，坐标和目标时间已固定；如需修改，请先停止当前任务。'),
           if (_taskActive) ...[
             Text('目标：$_taskTargetLabel'),
-            Text(remaining >= 0 ? '剩余约 ${remaining ~/ 3600000}小时 ${(remaining % 3600000) ~/ 60000}分 ${(remaining % 60000) ~/ 1000}.${(remaining % 1000).toString().padLeft(3, '0')}秒' : '等待系统触发'),
           ],
           const SizedBox(height: 12),
           SizedBox(width: double.infinity, child: FilledButton.icon(
