@@ -77,3 +77,12 @@
 - 将 GitHub Actions 工作流替换为用户提供的 `build-release.yml`，并移除旧 `release.yml`。
 - 增加手动 X/Y 坐标输入 Widget 测试及秒字段、倒计时移除等 UI 回归断言。
 - 当前环境缺少 Flutter/Dart/Android SDK；本修正版仍需在指定 GitHub Actions 工作流中执行 `flutter analyze`、`flutter test` 和 Release APK 构建。
+
+## Phase 10 regression repair (fix10)
+
+- Floating overlay close button now stops the service without sending an early stopped broadcast; the service reports stop from `onDestroy` after its running state is cleared and the overlay is removed.
+- Home reconciles native PiP state at initialization, on resume, and after returning from the scheduled-task route.
+- Scheduled-task route returns to the home clock if PiP is entered while that route is active, preventing the task page from becoming the PiP surface.
+- Coordinate crosshair uses overlay-window-local drawing coordinates derived from screen coordinates and the attached overlay origin; broadcasts continue to use physical screen coordinates.
+- Workflow remains named `.github/workflows/release.yml`.
+- Flutter/Android runtime tests are not claimed as executed in the packaging environment.

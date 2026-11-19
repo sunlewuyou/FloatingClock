@@ -140,6 +140,15 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
         _busy = false;
         _taskStatus = args['status']?.toString() ?? '任务已结束';
       });
+    } else if (call.method == 'onPiPChanged') {
+      final args = call.arguments;
+      final inPiP = args is Map ? args['isInPiP'] == true : args == true;
+      // ScheduledTaskPage is not the PiP clock UI. If PiP is entered while
+      // this route is visible, return to the home clock before Android captures
+      // the Flutter surface; Home then reconciles the native PiP state.
+      if (inPiP && mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
     }
   }
 

@@ -317,9 +317,8 @@ class FloatingClockService : Service() {
         container.addView(targetTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         closeBtn.setOnClickListener {
-            // Notify the foreground Flutter page immediately; onDestroy remains
-            // a second, lifecycle-level reconciliation signal.
-            notifyOverlayStopped()
+            // onDestroy broadcasts only after running=false and the overlay is
+            // actually removed. Avoid an early notification racing the stop.
             stopSelf()
         }
 

@@ -143,6 +143,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // Reconcile with the Android service after returning from the overlay.
       // This also covers OEMs that delay or coalesce the stopped broadcast.
       _refreshOverlayStatus();
+      _refreshPiPStatus();
       if (_uiTimer == null) {
         _restartUiTimer();
       }
@@ -320,6 +321,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!Platform.isAndroid) return;
     bool overlayRunning = _overlayRunning;
     bool pipSupported = _pipSupported;
+    bool pipMode = _isInPiP;
     try {
       final running = await _channel.invokeMethod<bool>('isOverlayRunning');
       if (running != null) overlayRunning = running;
@@ -328,12 +330,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final supported = await _channel.invokeMethod<bool>('isPiPSupported');
       if (supported != null) pipSupported = supported;
     } catch (_) {}
+    try {
+      pipMode = await _channel.invokeMethod<bool>('isInPiP') ?? pipMode;
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _overlayRunning = overlayRunning;
       _pipSupported = pipSupported;
+      _isInPiP = pipMode;
     });
   }
+
+
+  Future<void> _refreshPiPStatus() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final nativeState = await _channel.invokeMethod<bool>('isInPiP');
+      if (!mounted || nativeState == null || nativeState == _isInPiP) return;
+      setState(() => _isInPiP = nativeState);
+    } catch (_) {}
+  }
+
 
   Future<void> _refreshOverlayStatus() async {
     if (!Platform.isAndroid) return;
@@ -982,7 +999,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   refreshOffset: () => _refreshOffsetForScheduledTask(source),
                 ),
               ));
-              if (mounted) _channel.setMethodCallHandler(_handlePlatformCall);
+              if (mounted) {
+                _channel.setMethodCallHandler(_handlePlatformCall);
+                await _refreshPiPStatus();
+                await _refreshOverlayStatus();
+              }
             },
           ),
           PopupMenuButton<String>(

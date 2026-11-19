@@ -71,16 +71,25 @@ class CoordinatePickerService : Service() {
         root.addView(cancel, cancelLp)
 
 
+        // rawX/rawY are screen coordinates, while FrameLayout margins are local
+        // to the overlay window. Resolve the window origin after attachment so
+        // drawing is aligned even when the system bars affect the overlay origin.
+        val windowOrigin = IntArray(2)
+        root.getLocationOnScreen(windowOrigin)
         var crossX = metrics.widthPixels / 2
         var crossY = metrics.heightPixels / 2
-        fun moveCrosshair(x: Int, y: Int) {
-            crossX = x.coerceIn(0, metrics.widthPixels - 1)
-            crossY = y.coerceIn(0, metrics.heightPixels - 1)
-            horizontalLp.topMargin = crossY
-            verticalLp.leftMargin = crossX
+        fun moveCrosshair(screenX: Int, screenY: Int) {
+            crossX = screenX.coerceIn(0, metrics.widthPixels - 1)
+            crossY = screenY.coerceIn(0, metrics.heightPixels - 1)
+            val localX = (crossX - windowOrigin[0]).coerceIn(0, metrics.widthPixels - 1)
+            val localY = (crossY - windowOrigin[1]).coerceIn(0, metrics.heightPixels - 1)
+            horizontalLp.topMargin = localY
+            verticalLp.leftMargin = localX
             horizontal.layoutParams = horizontalLp
             vertical.layoutParams = verticalLp
             coordinateHud.text = "X $crossX  ·  Y $crossY"
+            // Broadcast and save physical screen coordinates, not window-local
+            // drawing coordinates, because AccessibilityService dispatches on screen.
             sendCoordinateUpdate(crossX, crossY, metrics)
         }
         root.setOnTouchListener { _, event ->
@@ -112,6 +121,7 @@ class CoordinatePickerService : Service() {
         try {
             windowManager?.addView(root, params)
             pickerView = root
+            root.getLocationOnScreen(windowOrigin)
         } catch (error: Exception) {
             Log.e(TAG, "Unable to show coordinate picker", error)
             stopSelf(startId)

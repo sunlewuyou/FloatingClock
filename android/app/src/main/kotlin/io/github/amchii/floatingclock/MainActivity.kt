@@ -358,6 +358,9 @@ class MainActivity : FlutterActivity() {
                         packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
                     result.success(supported)
                 }
+                "isInPiP" -> {
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode)
+                }
                 "enterPiP" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val params = PictureInPictureParams.Builder()
