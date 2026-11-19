@@ -148,10 +148,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _restartUiTimer();
       }
     } else if (state == AppLifecycleState.paused) {
-      // The main page is not visible while paused. Stop the high-frequency
-      // Dart timer; the Android overlay service owns its independent clock.
-      _uiTimer?.cancel();
-      _uiTimer = null;
+      // In PiP the Flutter clock remains visible even though the activity is
+      // backgrounded; keep its notifier ticking. Outside PiP the native overlay
+      // clock is independent, so stop the foreground UI timer to save work.
+      if (!_isInPiP) {
+        _uiTimer?.cancel();
+        _uiTimer = null;
+      }
     }
   }
 
@@ -363,24 +366,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _reconcileOverlayAfterStop() async {
-    // stopSelf() is asynchronous. Check a few times so a just-issued stop
-    // cannot briefly flip the button back to "停止悬浮" from stale native state.
-    for (var attempt = 0; attempt < 4; attempt++) {
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      if (!mounted) return;
-      try {
-        final running = await _channel.invokeMethod<bool>('isOverlayRunning');
-        if (running == false) return;
-        if (running == true && attempt == 3 && mounted) {
-          setState(() => _overlayRunning = true);
-        }
-      } catch (_) {
-        return;
-      }
-    }
-  }
-
   Future<void> _handlePlatformCall(MethodCall call) async {
     switch (call.method) {
       case 'onOverlayStopped':
@@ -393,7 +378,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _overlayRunning = false;
           _overlayOperationInProgress = false;
         });
-        unawaited(_reconcileOverlayAfterStop());
         break;
       case 'onPiPChanged':
         bool inPiP = false;
@@ -406,6 +390,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
         if (!mounted) return;
         setState(() => _isInPiP = inPiP);
+        // PiP still renders the Flutter clock while the Activity is paused.
+        // Re-start its tick source when PiP enters, and keep it available after
+        // exiting PiP until lifecycle reconciliation finishes.
+        _restartUiTimer();
         if (!inPiP) {
           // When leaving PiP, refresh overlay status in case service resumed.
           await _refreshOverlayStatus();
@@ -447,16 +435,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         setState(() => _overlayRunning = false);
       }
     }
+    // Switch Flutter to the compact clock surface before asking Android to enter
+    // PiP. The first frame captured by the system must not be the full Home UI.
+    if (!mounted) return;
+    setState(() => _isInPiP = true);
+    _restartUiTimer();
     try {
       final entered = await _channel.invokeMethod<bool>('enterPiP');
-      if (entered != null && !entered) {
-        if (!mounted) return;
+      if (!mounted) return;
+      if (entered == false) {
+        setState(() => _isInPiP = false);
+        _restartUiTimer();
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('无法进入画中画模式，请检查系统设置')));
       }
     } on PlatformException catch (e) {
       debugPrint('enterPiP failed: $e');
       if (!mounted) return;
+      setState(() => _isInPiP = false);
+      _restartUiTimer();
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('进入画中画失败')));
     }

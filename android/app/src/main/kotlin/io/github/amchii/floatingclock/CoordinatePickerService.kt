@@ -3,6 +3,8 @@ package io.github.amchii.floatingclock
 import android.app.Service
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.os.Build
@@ -15,6 +17,44 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.util.DisplayMetrics
 import android.util.Log
+
+/** Draws a crosshair in window-local canvas coordinates while preserving screen coordinates. */
+private class CrosshairLayer(
+    context: android.content.Context,
+    color: Int,
+    strokeWidthPx: Float
+) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        strokeWidth = strokeWidthPx
+        style = Paint.Style.STROKE
+    }
+    private var screenX = -1f
+    private var screenY = -1f
+    private var originX = 0f
+    private var originY = 0f
+
+    fun updateScreenPoint(x: Int, y: Int, windowX: Int, windowY: Int) {
+        screenX = x.toFloat()
+        screenY = y.toFloat()
+        originX = windowX.toFloat()
+        originY = windowY.toFloat()
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (screenX < 0f || screenY < 0f || width <= 0 || height <= 0) return
+        // Canvas clips at the View bounds. At display edges, the stroke may be
+        // clipped symmetrically, but its center (the coordinate) remains exact.
+        val local = screenToWindowLocal(screenX.toInt(), screenY.toInt(), originX.toInt(), originY.toInt())
+        val localX = local.x.toFloat()
+        val localY = local.y.toFloat()
+        canvas.drawLine(0f, localY, width.toFloat(), localY, paint)
+        canvas.drawLine(localX, 0f, localX, height.toFloat(), paint)
+    }
+}
+
 
 /** Transparent full-screen coordinate picker. Crosshair follows the finger; release confirms. */
 class CoordinatePickerService : Service() {
@@ -35,10 +75,7 @@ class CoordinatePickerService : Service() {
         val metrics = realDisplayMetrics()
         val root = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
         val density = resources.displayMetrics.density
-        val horizontal = View(this).apply { setBackgroundColor(Color.argb(230, 30, 144, 255)) }
-        val vertical = View(this).apply { setBackgroundColor(Color.argb(230, 30, 144, 255)) }
-        val horizontalLp = FrameLayout.LayoutParams(metrics.widthPixels, maxOf(1, (1.5f * density).toInt()), Gravity.TOP or Gravity.START)
-        val verticalLp = FrameLayout.LayoutParams(maxOf(1, (1.5f * density).toInt()), metrics.heightPixels, Gravity.TOP or Gravity.START)
+        val crosshair = CrosshairLayer(this, Color.argb(230, 30, 144, 255), maxOf(1f, 1.5f * density))
 
         val coordinateHud = TextView(this).apply {
             text = "X 0  ·  Y 0"
@@ -65,32 +102,32 @@ class CoordinatePickerService : Service() {
             topMargin = (12 * density).toInt()
             marginEnd = (12 * density).toInt()
         }
-        root.addView(horizontal, horizontalLp)
-        root.addView(vertical, verticalLp)
+        // Draw both axes in one clipped Canvas. Unlike margin-positioned child views,
+        // this keeps the line center tied to the actual touch point and prevents
+        // either line from extending beyond the overlay's drawable bounds.
+        root.addView(crosshair, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         root.addView(coordinateHud, hudLp)
         root.addView(cancel, cancelLp)
 
 
-        // rawX/rawY are screen coordinates, while FrameLayout margins are local
-        // to the overlay window. Resolve the window origin after attachment so
-        // drawing is aligned even when the system bars affect the overlay origin.
+        // rawX/rawY are physical display coordinates. Each move recomputes the
+        // attached overlay's screen origin and converts only for Canvas drawing.
         val windowOrigin = IntArray(2)
-        root.getLocationOnScreen(windowOrigin)
         var crossX = metrics.widthPixels / 2
         var crossY = metrics.heightPixels / 2
         fun moveCrosshair(screenX: Int, screenY: Int) {
-            crossX = screenX.coerceIn(0, metrics.widthPixels - 1)
-            crossY = screenY.coerceIn(0, metrics.heightPixels - 1)
-            val localX = (crossX - windowOrigin[0]).coerceIn(0, metrics.widthPixels - 1)
-            val localY = (crossY - windowOrigin[1]).coerceIn(0, metrics.heightPixels - 1)
-            horizontalLp.topMargin = localY
-            verticalLp.leftMargin = localX
-            horizontal.layoutParams = horizontalLp
-            vertical.layoutParams = verticalLp
+            // Clamp the physical touch coordinates to the real display pixel bounds.
+            // Drawing is a separate transform and never changes the saved target.
+            val currentMetrics = realDisplayMetrics()
+            crossX = screenX.coerceIn(0, currentMetrics.widthPixels - 1)
+            crossY = screenY.coerceIn(0, currentMetrics.heightPixels - 1)
+            root.getLocationOnScreen(windowOrigin)
+            crosshair.updateScreenPoint(crossX, crossY, windowOrigin[0], windowOrigin[1])
             coordinateHud.text = "X $crossX  ·  Y $crossY"
-            // Broadcast and save physical screen coordinates, not window-local
-            // drawing coordinates, because AccessibilityService dispatches on screen.
-            sendCoordinateUpdate(crossX, crossY, metrics)
+            // Broadcast physical screen coordinates and current display metadata.
+            // Local Canvas coordinates are never used as the saved click target.
+            sendCoordinateUpdate(crossX, crossY, currentMetrics)
         }
         root.setOnTouchListener { _, event ->
             when (event.actionMasked) {
@@ -100,7 +137,7 @@ class CoordinatePickerService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     moveCrosshair(event.rawX.toInt(), event.rawY.toInt())
-                    sendCoordinatePicked(crossX, crossY, metrics)
+                    sendCoordinatePicked(crossX, crossY, realDisplayMetrics())
                     stopSelf()
                     true
                 }
