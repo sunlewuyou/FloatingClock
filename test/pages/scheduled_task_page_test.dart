@@ -53,15 +53,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // The permission card is below the initial viewport in the ListView.
-    // Scroll it into the tree before asserting its contents.
-    await tester.scrollUntilVisible(
-      find.text('权限与任务状态'),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-
+    // Coordinate and time controls are in the first card; assert them before
+    // scrolling down so ListView lazy construction doesn't dispose that card.
     expect(find.text('定时点击任务'), findsOneWidget);
     expect(find.textContaining('腾讯时间'), findsOneWidget);
     expect(find.text('秒（0–59）'), findsOneWidget);
@@ -69,6 +62,15 @@ void main() {
     expect(find.text('Y 坐标'), findsOneWidget);
     expect(find.textContaining('剩余约'), findsNothing);
     expect(find.text('毫秒（000–999）'), findsOneWidget);
+
+    // The permission card is below the initial viewport; scroll it into view
+    // separately before asserting its lazy-built contents.
+    await tester.scrollUntilVisible(
+      find.text('权限与任务状态'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('无障碍点击服务'), findsOneWidget);
     expect(find.text('开始任务'), findsOneWidget);
   });

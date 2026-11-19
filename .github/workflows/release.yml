@@ -1,4 +1,4 @@
-# .github/workflows/build-release.yml
+# .github/workflows/release.yml
 name: Build and Release APK
 
 on:
