@@ -9,6 +9,7 @@ import 'package:floating_clock/models/time_source.dart';
 import 'package:floating_clock/widgets/clock_time_text.dart';
 import 'package:floating_clock/repositories/time_source_repository.dart';
 import 'package:floating_clock/services/time_sync_service.dart';
+import 'package:floating_clock/services/platform_method_dispatcher.dart';
 
 // Preset/source identifiers and defaults
 const String _presetNtpAliyun = 'ntp.aliyun.com';
@@ -57,6 +58,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _channel = MethodChannel('floating_clock');
+  VoidCallback? _removePlatformListener;
   final TimeSourceRepository _settingsRepository = TimeSourceRepository();
 
   Timer? _uiTimer;
@@ -90,7 +92,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _channel.setMethodCallHandler(_handlePlatformCall);
+    _removePlatformListener = PlatformMethodDispatcher.register(this, _handlePlatformCall);
     _initializePlatformState();
     _sources.add(TimeSource.system());
 
@@ -133,7 +135,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _removeSyncOverlay();
     WidgetsBinding.instance.removeObserver(this);
     // Do not leave a callback targeting a State object after this page is gone.
-    _channel.setMethodCallHandler(null);
+    _removePlatformListener?.call();
+    _removePlatformListener = null;
     super.dispose();
   }
 
@@ -526,12 +529,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         source.offsetMillis = offset!;
         source.lastSync = DateTime.now();
       });
-      if (_overlayRunning && _sources.isNotEmpty && _sources[_selectedIndex] == source) {
-        unawaited(_updateOverlayForSelected());
+      if (_sources.isNotEmpty && _sources[_selectedIndex] == source) {
+        // A time-source refresh while opening Scheduled Task must never resurrect
+        // a service from stale Flutter state. Confirm native service state first.
+        var nativeRunning = false;
+        try {
+          nativeRunning = await _channel.invokeMethod<bool>('isOverlayRunning') ?? false;
+        } catch (_) {}
+        if (!mounted) return offset;
+        if (_overlayRunning != nativeRunning) {
+          setState(() => _overlayRunning = nativeRunning);
+        }
+        if (nativeRunning) {
+          unawaited(_updateOverlayForSelected());
+        }
       }
     }
     return offset;
   }
+
 
   Future<bool> _startOverlayForSelected() async {
     try {
@@ -1001,7 +1017,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
               ));
               if (mounted) {
-                _channel.setMethodCallHandler(_handlePlatformCall);
                 await _refreshPiPStatus();
                 await _refreshOverlayStatus();
               }

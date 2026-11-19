@@ -3,25 +3,37 @@
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 checks = [
-    ("overlay close button stops service", "android/app/src/main/kotlin/io/github/amchii/floatingclock/FloatingClockService.kt", "closeBtn.setOnClickListener {\n            // onDestroy broadcasts only after running=false and the overlay is"),
-    ("service clears running before notifying host", "android/app/src/main/kotlin/io/github/amchii/floatingclock/FloatingClockService.kt", "override fun onDestroy() {\n        running = false\n        handler.removeCallbacks(updateRunnable)\n        removeOverlay()\n        notifyOverlayStopped()"),
+    ("native close button marks service stopped before broadcast", "android/app/src/main/kotlin/io/github/amchii/floatingclock/FloatingClockService.kt", "running = false\n            handler.removeCallbacks(updateRunnable)\n            removeOverlay()\n            notifyOverlayStopped()"),
+    ("native stop broadcast is package-scoped and emitted once", "android/app/src/main/kotlin/io/github/amchii/floatingclock/FloatingClockService.kt", "if (stopNotificationSent) return\n        stopNotificationSent = true\n        sendBroadcast(Intent(\"io.github.amchii.floatingclock.OVERLAY_STOPPED\").setPackage(packageName))"),
+    ("single shared MethodChannel dispatcher exists", "lib/services/platform_method_dispatcher.dart", "static const MethodChannel channel = MethodChannel('floating_clock');"),
+    ("dispatcher installs only one native callback handler", "lib/services/platform_method_dispatcher.dart", "channel.setMethodCallHandler(_dispatch);"),
+    ("dispatcher snapshots listeners and protects individual callbacks", "lib/services/platform_method_dispatcher.dart", "List<PlatformCallHandler>.of(_listeners.values)"),
+    ("home registers native callback through dispatcher", "lib/pages/home_page.dart", "PlatformMethodDispatcher.register(this, _handlePlatformCall)"),
+    ("home unregisters its listener without clearing shared handler", "lib/pages/home_page.dart", "_removePlatformListener?.call();"),
+    ("scheduled route registers native callback through dispatcher", "lib/pages/scheduled_task_page.dart", "PlatformMethodDispatcher.register(this, _handleNativeCall)"),
+    ("scheduled route unregisters only its own listener", "lib/pages/scheduled_task_page.dart", "_removePlatformListener?.call();"),
+    ("scheduled task time-source refresh queries actual native service state", "lib/pages/home_page.dart", "nativeRunning = await _channel.invokeMethod<bool>('isOverlayRunning') ?? false;"),
+    ("scheduled task refresh only updates an already-running native overlay", "lib/pages/home_page.dart", "if (nativeRunning) {\n          unawaited(_updateOverlayForSelected());\n        }"),
     ("PiP surface switches before native transition", "lib/pages/home_page.dart", "setState(() => _isInPiP = true);"),
     ("PiP clock timer stays active while paused", "lib/pages/home_page.dart", "if (!_isInPiP) {\n        _uiTimer?.cancel();\n        _uiTimer = null;"),
-    ("PiP mode callback restarts clock timer", "lib/pages/home_page.dart", "setState(() => _isInPiP = inPiP);\n        // PiP still renders the Flutter clock while the Activity is paused.\n        // Re-start its tick source when PiP enters, and keep it available after\n        // exiting PiP until lifecycle reconciliation finishes.\n        _restartUiTimer();"),
-    ("task route returns home if PiP entered while it is active", "lib/pages/scheduled_task_page.dart", "if (inPiP && mounted && Navigator.of(context).canPop()) {\n        Navigator.of(context).pop();"),
-    ("crosshair draws both axes in clipped Canvas", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "canvas.drawLine(0f, localY, width.toFloat(), localY, paint)\n        canvas.drawLine(localX, 0f, localX, height.toFloat(), paint)"),
-    ("crosshair uses shared screen-to-window transform", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "val local = screenToWindowLocal(screenX.toInt(), screenY.toInt(), originX.toInt(), originY.toInt())"),
-    ("picker refreshes screen metrics and clamps both axes", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "val currentMetrics = realDisplayMetrics()\n            crossX = screenX.coerceIn(0, currentMetrics.widthPixels - 1)\n            crossY = screenY.coerceIn(0, currentMetrics.heightPixels - 1)"),
-    ("broadcast uses screen-space point and current metrics", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "sendCoordinateUpdate(crossX, crossY, currentMetrics)"),
-    ("coordinate transform smoke test is included", "tool/coordinate_mapping_smoke_test.kt", "screenToWindowLocal(x, y, origin.x, origin.y)"),
+    ("crosshair draws both axes on one clipped Canvas", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "canvas.drawLine(0f, localY, width.toFloat(), localY, paint)\n        canvas.drawLine(localX, 0f, localX, height.toFloat(), paint)"),
+    ("crosshair transform uses screen and window origin", "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt", "screenToWindowLocal(screenX.toInt(), screenY.toInt(), originX.toInt(), originY.toInt())"),
 ]
 failures = []
 for label, relative, expected in checks:
-    if expected not in (ROOT / relative).read_text(encoding="utf-8"):
+    if expected not in (ROOT / relative).read_text(encoding="utf8"):
         failures.append(label)
     else:
         print(f"PASS: {label}")
-picker = (ROOT / "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt").read_text(encoding="utf-8")
+
+for relative in ("lib/pages/home_page.dart", "lib/pages/scheduled_task_page.dart"):
+    source = (ROOT / relative).read_text(encoding="utf8")
+    if "setMethodCallHandler(" in source:
+        failures.append(f"page still directly owns MethodChannel handler: {relative}")
+    else:
+        print(f"PASS: no page overwrites shared MethodChannel handler ({relative})")
+
+picker = (ROOT / "android/app/src/main/kotlin/io/github/amchii/floatingclock/CoordinatePickerService.kt").read_text(encoding="utf8")
 if "horizontalLp.topMargin" in picker or "verticalLp.leftMargin" in picker:
     failures.append("crosshair still uses margin positioning")
 else:

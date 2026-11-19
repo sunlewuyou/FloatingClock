@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:floating_clock/services/platform_method_dispatcher.dart';
 
 class _SavedCoordinate {
   const _SavedCoordinate({required this.name, required this.x, required this.y, required this.screenWidth, required this.screenHeight, required this.densityDpi, required this.rotation});
@@ -42,6 +43,7 @@ class ScheduledTaskPage extends StatefulWidget {
 
 class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('floating_clock');
+  VoidCallback? _removePlatformListener;
   static const String _coordinatesKey = 'scheduled_click_coordinates_v1';
   static const String _lastCoordinateKey = 'scheduled_click_last_coordinate_v1';
 
@@ -75,7 +77,7 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
     _initializeDefaultTargetTime();
     _loadSavedState();
     _refreshPermissions();
-    _channel.setMethodCallHandler(_handleNativeCall);
+    _removePlatformListener = PlatformMethodDispatcher.register(this, _handleNativeCall);
   }
 
   @override
@@ -86,7 +88,8 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
     _yController.dispose();
     _secondController.dispose();
     _millisecondController.dispose();
-    _channel.setMethodCallHandler(null);
+    _removePlatformListener?.call();
+    _removePlatformListener = null;
     super.dispose();
   }
 
