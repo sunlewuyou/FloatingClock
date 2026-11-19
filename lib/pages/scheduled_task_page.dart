@@ -148,12 +148,14 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
     try { offset = await widget.refreshOffset() ?? offset; } catch (_) {}
     try {
       final m = await _channel.invokeMapMethod<Object?, Object?>('getCoordinateScreenInfo');
-      if (m != null) _screenInfo = {
-        'screenWidth': (m['screenWidth'] as num?)?.toInt() ?? 0,
-        'screenHeight': (m['screenHeight'] as num?)?.toInt() ?? 0,
-        'densityDpi': (m['densityDpi'] as num?)?.toInt() ?? 0,
-        'rotation': (m['rotation'] as num?)?.toInt() ?? 0,
-      };
+      if (m != null) {
+        _screenInfo = {
+          'screenWidth': (m['screenWidth'] as num?)?.toInt() ?? 0,
+          'screenHeight': (m['screenHeight'] as num?)?.toInt() ?? 0,
+          'densityDpi': (m['densityDpi'] as num?)?.toInt() ?? 0,
+          'rotation': (m['rotation'] as num?)?.toInt() ?? 0,
+        };
+      }
     } catch (_) {}
     final activeState = await _channel.invokeMapMethod<Object?, Object?>('getScheduledTaskState');
     if (activeState?['active'] == true || !mounted) return;
@@ -360,9 +362,9 @@ class _ScheduledTaskPageState extends State<ScheduledTaskPage> with WidgetsBindi
         'y': coordinate.y,
         'coordinateName': coordinate.name,
         'screenWidth': coordinate.screenWidth,
-        'screenHeight': coordinate.screenHeight,
-        'densityDpi': coordinate.densityDpi,
-        'rotation': coordinate.rotation,
+          'screenHeight': coordinate.screenHeight,
+          'densityDpi': coordinate.densityDpi,
+          'rotation': coordinate.rotation,
         'targetLabel': label,
         'sourceOffsetMillis': freshOffset,
         'sourceLabel': widget.sourceLabel,
