@@ -322,6 +322,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _initializePlatformState() async {
     if (!Platform.isAndroid) return;
+    // Ignore stale native status results if a close event arrived while queries
+    // were in flight. The stop event is authoritative for this operation.
+    final overlayGeneration = _overlayOperationGeneration;
     bool overlayRunning = _overlayRunning;
     bool pipSupported = _pipSupported;
     bool pipMode = _isInPiP;
@@ -336,7 +339,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       pipMode = await _channel.invokeMethod<bool>('isInPiP') ?? pipMode;
     } catch (_) {}
-    if (!mounted) return;
+    if (!mounted || overlayGeneration != _overlayOperationGeneration) return;
     setState(() {
       _overlayRunning = overlayRunning;
       _pipSupported = pipSupported;
@@ -357,9 +360,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _refreshOverlayStatus() async {
     if (!Platform.isAndroid) return;
+    final overlayGeneration = _overlayOperationGeneration;
     try {
       final running = await _channel.invokeMethod<bool>('isOverlayRunning');
-      if (!mounted || running == null) return;
+      if (!mounted || running == null || overlayGeneration != _overlayOperationGeneration) return;
       if (running != _overlayRunning) {
         setState(() => _overlayRunning = running);
       }

@@ -60,6 +60,7 @@ class FloatingClockService : Service() {
     private var lastTaskDisplayCheckElapsedRealtime = 0L
     private var cachedTaskActive = false
     private var cachedTaskTargetLabel: String? = null
+    private var stopNotificationSent = false
 
     // Keep the last requested display configuration so Android can recreate a sticky
     // service after process reclamation without silently reverting to default values.
@@ -85,6 +86,7 @@ class FloatingClockService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        stopNotificationSent = false
         // Apply the latest settings before scheduling updates. Repeated start requests
         // update the existing service instead of creating another overlay or timer.
         if (intent == null) {
@@ -149,11 +151,13 @@ class FloatingClockService : Service() {
         running = false
         handler.removeCallbacks(updateRunnable)
         removeOverlay()
-        notifyOverlayStopped()
+        if (!stopNotificationSent) notifyOverlayStopped()
         super.onDestroy()
     }
 
     private fun notifyOverlayStopped() {
+        if (stopNotificationSent) return
+        stopNotificationSent = true
         sendBroadcast(Intent("io.github.amchii.floatingclock.OVERLAY_STOPPED").setPackage(packageName))
     }
 
@@ -317,8 +321,13 @@ class FloatingClockService : Service() {
         container.addView(targetTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         closeBtn.setOnClickListener {
-            // onDestroy broadcasts only after running=false and the overlay is
-            // actually removed. Avoid an early notification racing the stop.
+            // Make the native stopped state authoritative immediately, rather than
+            // waiting for onDestroy while Flutter may still query the service.
+            running = false
+            handler.removeCallbacks(updateRunnable)
+            removeOverlay()
+            notifyOverlayStopped()
+            stopForegroundCompat()
             stopSelf()
         }
 
